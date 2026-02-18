@@ -1,0 +1,15 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<h1>Welcome to CRM</h1>
+
+<div style="margin: 2rem 0;">
+    <p style="margin-bottom: 0.5rem;">Total Customers: <strong>{{ total_customers }}</strong></p>
+    <p style="margin-bottom: 0;">Total Leads: <strong>{{ total_leads }}</strong></p>
+</div>
+
+<div style="margin-top: 2rem;">
+    <a href="{{ url_for('customers') }}" class="btn btn-primary" style="margin-right: 1rem;">View Customers</a>
+    <a href="{{ url_for('leads') }}" class="btn btn-primary">View Leads</a>
+</div>
+{% endblock %}
