@@ -1,0 +1,29 @@
+@startuml
+title Activity 1: Add Customer (Base CRM)
+start
+:Open "Add Customer" form;
+:Enter name, email, company, phone, status;
+if (All required fields valid?) then (yes)
+  :Create customer record;
+  :Show success message;
+  :Redirect to Customers list;
+else (no)
+  :Show error message;
+  :Stay on form;
+endif
+stop
+
+newpage
+title Activity 2: Save Customer to SQLite (Extension)
+start
+:Receive POST /customers/add;
+:Validate input;
+if (valid?) then (yes)
+  :Insert customer into SQLite DB;
+  :Commit transaction;
+  :Redirect to /customers;
+else (no)
+  :Return error + redirect back;
+endif
+stop
+@enduml

@@ -1,0 +1,26 @@
+@startuml
+left to right direction
+
+actor "Sales User" as Sales
+actor "Admin" as Admin
+
+rectangle "Flask CRM System" {
+  usecase "View Dashboard" as UC_Dash
+
+  usecase "Manage Customers (CRUD)" as UC_Cust
+  usecase "Manage Leads (CRUD)" as UC_Lead
+  usecase "Log Customer Contact" as UC_Contact
+
+  usecase "Persist data in SQLite" as UC_SQLite
+}
+
+Sales --> UC_Dash
+Sales --> UC_Cust
+Sales --> UC_Lead
+Sales --> UC_Contact
+
+Admin --> UC_SQLite
+UC_Cust ..> UC_SQLite : <<include>>
+UC_Lead ..> UC_SQLite : <<include>>
+UC_Contact ..> UC_SQLite : <<include>>
+@enduml

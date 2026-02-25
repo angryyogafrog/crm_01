@@ -1,0 +1,36 @@
+@startuml
+hide circle
+skinparam linetype ortho
+
+entity Customer {
+  * id : int <<PK>>
+  --
+  name : string
+  email : string
+  company : string
+  phone : string
+  status : string
+}
+
+entity Lead {
+  * id : int <<PK>>
+  --
+  name : string
+  email : string
+  company : string
+  value : float
+  source : string
+  status : string
+}
+
+entity Contact {
+  * id : int <<PK>>
+  --
+  customer_id : int <<FK>>
+  contact_type : string
+  notes : text
+  date : datetime
+}
+
+Customer ||--o{ Contact : has
+@enduml

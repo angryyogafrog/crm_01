@@ -1,0 +1,54 @@
+@startuml
+title Sequence 1: Create Customer (MVC)
+actor User
+participant Browser
+participant "Flask Controller\n(app.py)" as C
+participant "Customer Model\n(models.py)" as M
+participant "Template\n(customers.html)" as T
+
+User -> Browser: Fill form + submit
+Browser -> C: POST /customers/add
+activate C
+C -> C: Validate form data
+alt valid
+  C -> M: add_customer(...)
+  activate M
+  M --> C: Customer created
+  deactivate M
+  C --> Browser: Redirect /customers
+  Browser -> C: GET /customers
+  C -> M: get_all_customers()
+  M --> C: List<Customer>
+  C -> T: render_template(...)
+  T --> C: HTML
+  C --> Browser: 200 OK (HTML)
+else invalid
+  C --> Browser: Redirect back + flash error
+end
+deactivate C
+@enduml
+
+newpage
+
+@startuml
+title Sequence 2: Create Customer (SQLite persistence)
+actor User
+participant Browser
+participant "Flask Controller" as C
+participant "SQLAlchemy/DB Layer" as DB
+
+User -> Browser: Submit form
+Browser -> C: POST /customers/add
+activate C
+C -> C: Validate
+alt valid
+  C -> DB: INSERT INTO customer (...)
+  activate DB
+  DB --> C: OK (commit)
+  deactivate DB
+  C --> Browser: Redirect /customers
+else invalid
+  C --> Browser: Redirect back + error
+end
+deactivate C
+@enduml
