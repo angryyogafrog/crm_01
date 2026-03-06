@@ -1,0 +1,25 @@
+@startuml
+title Activity Diagram - Persist data in SQLite
+
+|Sales User|
+start
+:Submit form (e.g., Add Customer);
+
+|CRM System|
+:Receive POST request;
+:Validate input;
+
+if (Input valid?) then (Yes)
+  :Open DB session/connection;
+  :Insert/Update record in SQLite;
+  :Commit transaction;
+  :Flash success message;
+  :Redirect to list page;
+  stop
+else (No)
+  :Flash error message;
+  :Redirect back to form;
+  stop
+endif
+
+@enduml

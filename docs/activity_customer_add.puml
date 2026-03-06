@@ -1,0 +1,28 @@
+@startuml
+title Activity Diagram - Add Customer
+
+|Sales User|
+start
+:Open "Add Customer" form;
+:Fill in customer data;
+:Click "Save";
+
+|CRM System|
+:Receive POST /customers/add;
+:Validate input;
+
+if (Input valid?) then (Yes)
+  :Create customer record;
+  :Flash success message;
+  :Redirect to /customers;
+  :Render customers list;
+  stop
+else (No)
+  :Flash error message;
+  :Redirect back to /customers/add;
+  |Sales User|
+  :Correct input;
+  --> :Click "Save";
+endif
+
+@enduml
