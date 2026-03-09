@@ -1,3 +1,7 @@
+import sqlite3
+
+DB_NAME = "crm.db"
+
 class Customer:
     customers = []
     next_id = 1
@@ -84,3 +88,21 @@ class Lead:
         lead = cls.get_lead_by_id(lead_id)
         if lead:
             cls.leads.remove(lead)
+
+def init_db():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS customers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT,
+        email TEXT,
+        company TEXT,
+        phone TEXT,
+        status TEXT
+    )
+    """)
+
+    conn.commit()
+    conn.close()
