@@ -13,7 +13,7 @@ def init_sample_data():
     Lead.add_lead('Alice Brown', 'alice@example.com', 'StartUp Inc', 50000, 'Website')
     Lead.add_lead('Charlie Davis', 'charlie@example.com', 'Enterprise Ltd', 100000, 'Referral')
 
-init_sample_data()
+# init_sample_data() init_sample_data()
 
 @app.route('/')
 def index():
