@@ -1,38 +1,42 @@
 {% extends 'base.html' %}
 
+{% block title %}Add Lead - CRM{% endblock %}
+
 {% block content %}
 <h1>Add Lead</h1>
 
 <form method="POST">
     <div class="form-group">
-        <label>Name:</label>
-        <input type="text" name="name" required>
+        <label for="name">Name:</label>
+        <input type="text" id="name" name="name" required>
     </div>
-    
+
     <div class="form-group">
-        <label>Email:</label>
-        <input type="email" name="email" required>
+        <label for="email">Email:</label>
+        <input type="email" id="email" name="email" required>
     </div>
-    
+
     <div class="form-group">
-        <label>Company:</label>
-        <input type="text" name="company" required>
+        <label for="company">Company:</label>
+        <input type="text" id="company" name="company">
     </div>
-    
+
     <div class="form-group">
-        <label>Deal Value:</label>
-        <input type="number" name="value" step="0.01" required>
+        <label for="phone">Phone:</label>
+        <input type="text" id="phone" name="phone">
     </div>
-    
+
     <div class="form-group">
-        <label>Source:</label>
-        <select name="source">
-            <option>Website</option>
-            <option>Email</option>
-            <option>Referral</option>
+        <label for="source">Source:</label>
+        <select id="source" name="source">
+            <option value="Website">Website</option>
+            <option value="Email">Email</option>
+            <option value="Referral">Referral</option>
+            <option value="Phone Call">Phone Call</option>
+            <option value="Social Media">Social Media</option>
         </select>
     </div>
-    
+
     <button type="submit" class="btn btn-primary">Add Lead</button>
 </form>
 {% endblock %}

@@ -1,130 +1,892 @@
-from flask import Flask, render_template, request, redirect, url_for, flash
-from models import Customer, Lead, init_db
+from functools import wraps
+from flask import Flask, render_template, request, redirect, url_for, flash, abort, jsonify
+from flask_login import LoginManager, login_user, logout_user, login_required, current_user
+from flask_swagger_ui import get_swaggerui_blueprint
+from models import db, Customer, Lead, User
 
 app = Flask(__name__)
-app.secret_key = 'your-secret-key-change-this'
+app.config["SECRET_KEY"] = "super_secret_key_change_this"
+app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///crm.db"
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
-init_db()
+db.init_app(app)
 
-def init_sample_data():
-    Customer.add_customer('John Doe', 'john@example.com', 'Acme Corp', '555-0001', 'active')
-    Customer.add_customer('Jane Smith', 'jane@example.com', 'Tech Solutions', '555-0002', 'prospect')
-    Customer.add_customer('Bob Wilson', 'bob@example.com', 'Global Industries', '555-0003', 'inactive')
-    Lead.add_lead('Alice Brown', 'alice@example.com', 'StartUp Inc', 50000, 'Website')
-    Lead.add_lead('Charlie Davis', 'charlie@example.com', 'Enterprise Ltd', 100000, 'Referral')
+login_manager = LoginManager()
+login_manager.login_view = "login"
+login_manager.login_message = "Please log in first."
+login_manager.init_app(app)
 
-# init_sample_data() init_sample_data()
+SWAGGER_URL = "/api/docs"
+API_URL = "/openapi.json"
 
-@app.route('/')
+swaggerui_blueprint = get_swaggerui_blueprint(
+    SWAGGER_URL,
+    API_URL,
+    config={
+        "app_name": "CRM REST API"
+    }
+)
+
+app.register_blueprint(swaggerui_blueprint, url_prefix=SWAGGER_URL)
+
+
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(int(user_id))
+
+
+def admin_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not current_user.is_authenticated:
+            return login_manager.unauthorized()
+
+        if not current_user.is_admin():
+            abort(403)
+
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+@app.route("/openapi.json", methods=["GET"])
+def openapi_spec():
+    spec = {
+        "openapi": "3.0.3",
+        "info": {
+            "title": "CRM REST API",
+            "version": "1.0.0",
+            "description": "API for managing customers and leads in the CRM system."
+        },
+        "servers": [
+            {"url": "http://127.0.0.1:5000"}
+        ],
+        "components": {
+            "schemas": {
+                "Customer": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "integer", "example": 1},
+                        "name": {"type": "string", "example": "Anna Nowak"},
+                        "email": {"type": "string", "example": "anna@test.com"},
+                        "company": {"type": "string", "example": "Test Company"},
+                        "phone": {"type": "string", "example": "123456789"},
+                        "status": {"type": "string", "example": "prospect"}
+                    }
+                },
+                "CustomerInput": {
+                    "type": "object",
+                    "required": ["name", "email"],
+                    "properties": {
+                        "name": {"type": "string", "example": "Anna Nowak"},
+                        "email": {"type": "string", "example": "anna@test.com"},
+                        "company": {"type": "string", "example": "Test Company"},
+                        "phone": {"type": "string", "example": "123456789"},
+                        "status": {"type": "string", "example": "prospect"}
+                    }
+                },
+                "Lead": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "integer", "example": 1},
+                        "name": {"type": "string", "example": "Max Mustermann"},
+                        "email": {"type": "string", "example": "max@test.com"},
+                        "company": {"type": "string", "example": "Demo GmbH"},
+                        "phone": {"type": "string", "example": "987654321"},
+                        "source": {"type": "string", "example": "Website"}
+                    }
+                },
+                "LeadInput": {
+                    "type": "object",
+                    "required": ["name", "email"],
+                    "properties": {
+                        "name": {"type": "string", "example": "Max Mustermann"},
+                        "email": {"type": "string", "example": "max@test.com"},
+                        "company": {"type": "string", "example": "Demo GmbH"},
+                        "phone": {"type": "string", "example": "987654321"},
+                        "source": {"type": "string", "example": "Website"}
+                    }
+                },
+                "Health": {
+                    "type": "object",
+                    "properties": {
+                        "status": {"type": "string", "example": "ok"}
+                    }
+                },
+                "Message": {
+                    "type": "object",
+                    "properties": {
+                        "message": {"type": "string", "example": "Deleted successfully"}
+                    }
+                },
+                "Error": {
+                    "type": "object",
+                    "properties": {
+                        "error": {"type": "string", "example": "Customer not found"}
+                    }
+                }
+            }
+        },
+        "paths": {
+            "/api/health": {
+                "get": {
+                    "summary": "Health check",
+                    "responses": {
+                        "200": {
+                            "description": "API is running",
+                            "content": {
+                                "application/json": {
+                                    "schema": {"$ref": "#/components/schemas/Health"}
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "/api/customers": {
+                "get": {
+                    "summary": "Get all customers",
+                    "responses": {
+                        "200": {
+                            "description": "List of customers",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "array",
+                                        "items": {"$ref": "#/components/schemas/Customer"}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "post": {
+                    "summary": "Create customer",
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {"$ref": "#/components/schemas/CustomerInput"}
+                            }
+                        }
+                    },
+                    "responses": {
+                        "201": {
+                            "description": "Customer created",
+                            "content": {
+                                "application/json": {
+                                    "schema": {"$ref": "#/components/schemas/Customer"}
+                                }
+                            }
+                        },
+                        "400": {
+                            "description": "Invalid input",
+                            "content": {
+                                "application/json": {
+                                    "schema": {"$ref": "#/components/schemas/Error"}
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "/api/customers/{customer_id}": {
+                "get": {
+                    "summary": "Get customer by ID",
+                    "parameters": [
+                        {
+                            "name": "customer_id",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "integer"}
+                        }
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "Customer found",
+                            "content": {
+                                "application/json": {
+                                    "schema": {"$ref": "#/components/schemas/Customer"}
+                                }
+                            }
+                        },
+                        "404": {
+                            "description": "Customer not found",
+                            "content": {
+                                "application/json": {
+                                    "schema": {"$ref": "#/components/schemas/Error"}
+                                }
+                            }
+                        }
+                    }
+                },
+                "put": {
+                    "summary": "Update customer",
+                    "parameters": [
+                        {
+                            "name": "customer_id",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "integer"}
+                        }
+                    ],
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {"$ref": "#/components/schemas/CustomerInput"}
+                            }
+                        }
+                    },
+                    "responses": {
+                        "200": {
+                            "description": "Customer updated",
+                            "content": {
+                                "application/json": {
+                                    "schema": {"$ref": "#/components/schemas/Customer"}
+                                }
+                            }
+                        },
+                        "400": {
+                            "description": "Invalid input",
+                            "content": {
+                                "application/json": {
+                                    "schema": {"$ref": "#/components/schemas/Error"}
+                                }
+                            }
+                        },
+                        "404": {
+                            "description": "Customer not found",
+                            "content": {
+                                "application/json": {
+                                    "schema": {"$ref": "#/components/schemas/Error"}
+                                }
+                            }
+                        }
+                    }
+                },
+                "delete": {
+                    "summary": "Delete customer",
+                    "parameters": [
+                        {
+                            "name": "customer_id",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "integer"}
+                        }
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "Customer deleted",
+                            "content": {
+                                "application/json": {
+                                    "schema": {"$ref": "#/components/schemas/Message"}
+                                }
+                            }
+                        },
+                        "404": {
+                            "description": "Customer not found",
+                            "content": {
+                                "application/json": {
+                                    "schema": {"$ref": "#/components/schemas/Error"}
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "/api/leads": {
+                "get": {
+                    "summary": "Get all leads",
+                    "responses": {
+                        "200": {
+                            "description": "List of leads",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "array",
+                                        "items": {"$ref": "#/components/schemas/Lead"}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "post": {
+                    "summary": "Create lead",
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {"$ref": "#/components/schemas/LeadInput"}
+                            }
+                        }
+                    },
+                    "responses": {
+                        "201": {
+                            "description": "Lead created",
+                            "content": {
+                                "application/json": {
+                                    "schema": {"$ref": "#/components/schemas/Lead"}
+                                }
+                            }
+                        },
+                        "400": {
+                            "description": "Invalid input",
+                            "content": {
+                                "application/json": {
+                                    "schema": {"$ref": "#/components/schemas/Error"}
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "/api/leads/{lead_id}": {
+                "get": {
+                    "summary": "Get lead by ID",
+                    "parameters": [
+                        {
+                            "name": "lead_id",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "integer"}
+                        }
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "Lead found",
+                            "content": {
+                                "application/json": {
+                                    "schema": {"$ref": "#/components/schemas/Lead"}
+                                }
+                            }
+                        },
+                        "404": {
+                            "description": "Lead not found",
+                            "content": {
+                                "application/json": {
+                                    "schema": {"$ref": "#/components/schemas/Error"}
+                                }
+                            }
+                        }
+                    }
+                },
+                "put": {
+                    "summary": "Update lead",
+                    "parameters": [
+                        {
+                            "name": "lead_id",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "integer"}
+                        }
+                    ],
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {"$ref": "#/components/schemas/LeadInput"}
+                            }
+                        }
+                    },
+                    "responses": {
+                        "200": {
+                            "description": "Lead updated",
+                            "content": {
+                                "application/json": {
+                                    "schema": {"$ref": "#/components/schemas/Lead"}
+                                }
+                            }
+                        },
+                        "400": {
+                            "description": "Invalid input",
+                            "content": {
+                                "application/json": {
+                                    "schema": {"$ref": "#/components/schemas/Error"}
+                                }
+                            }
+                        },
+                        "404": {
+                            "description": "Lead not found",
+                            "content": {
+                                "application/json": {
+                                    "schema": {"$ref": "#/components/schemas/Error"}
+                                }
+                            }
+                        }
+                    }
+                },
+                "delete": {
+                    "summary": "Delete lead",
+                    "parameters": [
+                        {
+                            "name": "lead_id",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "integer"}
+                        }
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "Lead deleted",
+                            "content": {
+                                "application/json": {
+                                    "schema": {"$ref": "#/components/schemas/Message"}
+                                }
+                            }
+                        },
+                        "404": {
+                            "description": "Lead not found",
+                            "content": {
+                                "application/json": {
+                                    "schema": {"$ref": "#/components/schemas/Error"}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return jsonify(spec)
+
+
+@app.route("/")
 def index():
-    total_customers = len(Customer.get_all_customers())
-    total_leads = len(Lead.get_all_leads())
-    return render_template('index.html', total_customers=total_customers, total_leads=total_leads)
+    return render_template("index.html")
 
-@app.route('/customers')
+
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    if request.method == "POST":
+        username = request.form["username"].strip()
+        password = request.form["password"]
+        confirm_password = request.form["confirm_password"]
+
+        if not username or not password or not confirm_password:
+            flash("All fields are required.", "error")
+            return redirect(url_for("register"))
+
+        if password != confirm_password:
+            flash("Passwords do not match.", "error")
+            return redirect(url_for("register"))
+
+        existing_user = User.query.filter_by(username=username).first()
+        if existing_user:
+            flash("Username already exists.", "error")
+            return redirect(url_for("register"))
+
+        user_count = User.query.count()
+        role = "admin" if user_count == 0 else "user"
+
+        user = User(username=username, role=role)
+        user.set_password(password)
+
+        db.session.add(user)
+        db.session.commit()
+
+        flash("Registration successful. You can now log in.", "success")
+        return redirect(url_for("login"))
+
+    return render_template("register.html")
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        username = request.form["username"].strip()
+        password = request.form["password"]
+
+        user = User.query.filter_by(username=username).first()
+
+        if user and user.check_password(password):
+            login_user(user)
+            flash("Logged in successfully.", "success")
+            return redirect(url_for("customers"))
+
+        flash("Invalid username or password.", "error")
+        return redirect(url_for("login"))
+
+    return render_template("login.html")
+
+
+@app.route("/logout")
+@login_required
+def logout():
+    logout_user()
+    flash("Logged out successfully.", "success")
+    return redirect(url_for("index"))
+
+
+@app.route("/customers")
+@login_required
 def customers():
-    return render_template('customers.html', customers=Customer.get_all_customers())
+    all_customers = Customer.query.order_by(Customer.id.desc()).all()
+    return render_template("customers.html", customers=all_customers)
 
-@app.route('/customers/add', methods=['GET', 'POST'])
+
+@app.route("/customers/add", methods=["GET", "POST"])
+@login_required
+@admin_required
 def add_customer():
-    if request.method == 'POST':
-        name = request.form.get('name')
-        email = request.form.get('email')
-        company = request.form.get('company')
-        phone = request.form.get('phone')
-        status = request.form.get('status', 'prospect')
+    if request.method == "POST":
+        name = request.form["name"].strip()
+        email = request.form["email"].strip()
+        company = request.form["company"].strip()
+        phone = request.form["phone"].strip()
+        status = request.form["status"].strip()
 
-        if not all([name, email, company, phone]):
-            flash('All fields are required!', 'error')
-            return redirect(url_for('add_customer'))
+        if not name or not email:
+            flash("Name and email are required.", "error")
+            return redirect(url_for("add_customer"))
 
-        Customer.add_customer(name, email, company, phone, status)
-        flash(f'Customer {name} added successfully!', 'success')
-        return redirect(url_for('customers'))
-    return render_template('add_customer.html')
-
-@app.route('/customers/<int:customer_id>')
-def customer_detail(customer_id):
-    customer = Customer.get_customer_by_id(customer_id)
-    if not customer:
-        flash('Customer not found!', 'error')
-        return redirect(url_for('customers'))
-    return render_template('customer_detail.html', customer=customer)
-
-@app.route('/customers/<int:customer_id>/edit', methods=['GET', 'POST'])
-def edit_customer(customer_id):
-    customer = Customer.get_customer_by_id(customer_id)
-    if not customer:
-        flash('Customer not found!', 'error')
-        return redirect(url_for('customers'))
-
-    if request.method == 'POST':
-        Customer.update_customer(
-            customer_id,
-            request.form.get('name'),
-            request.form.get('email'),
-            request.form.get('company'),
-            request.form.get('phone'),
-            request.form.get('status')
+        customer = Customer(
+            name=name,
+            email=email,
+            company=company,
+            phone=phone,
+            status=status
         )
-        flash('Customer updated successfully!', 'success')
-        return redirect(url_for('customer_detail', customer_id=customer_id))
 
-    return render_template('edit_customer.html', customer=customer)
+        db.session.add(customer)
+        db.session.commit()
 
-@app.route('/customers/<int:customer_id>/delete', methods=['POST'])
+        flash("Customer added successfully.", "success")
+        return redirect(url_for("customers"))
+
+    return render_template("add_customer.html")
+
+
+@app.route("/customers/<int:customer_id>/edit", methods=["GET", "POST"])
+@login_required
+@admin_required
+def edit_customer(customer_id):
+    customer = Customer.query.get_or_404(customer_id)
+
+    if request.method == "POST":
+        name = request.form["name"].strip()
+        email = request.form["email"].strip()
+        company = request.form["company"].strip()
+        phone = request.form["phone"].strip()
+        status = request.form["status"].strip()
+
+        if not name or not email:
+            flash("Name and email are required.", "error")
+            return redirect(url_for("edit_customer", customer_id=customer_id))
+
+        customer.name = name
+        customer.email = email
+        customer.company = company
+        customer.phone = phone
+        customer.status = status
+
+        db.session.commit()
+
+        flash("Customer updated successfully.", "success")
+        return redirect(url_for("customers"))
+
+    return render_template("edit_customer.html", customer=customer)
+
+
+@app.route("/customers/<int:customer_id>/delete", methods=["POST"])
+@login_required
+@admin_required
 def delete_customer(customer_id):
-    Customer.delete_customer(customer_id)
-    flash('Customer deleted successfully!', 'success')
-    return redirect(url_for('customers'))
+    customer = Customer.query.get_or_404(customer_id)
 
-@app.route('/leads')
+    db.session.delete(customer)
+    db.session.commit()
+
+    flash("Customer deleted successfully.", "success")
+    return redirect(url_for("customers"))
+
+
+@app.route("/leads")
+@login_required
 def leads():
-    return render_template('leads.html', leads=Lead.get_all_leads())
+    all_leads = Lead.query.order_by(Lead.id.desc()).all()
+    return render_template("leads.html", leads=all_leads)
 
-@app.route('/leads/add', methods=['GET', 'POST'])
+
+@app.route("/leads/add", methods=["GET", "POST"])
+@login_required
+@admin_required
 def add_lead():
-    if request.method == 'POST':
-        name = request.form.get('name')
-        email = request.form.get('email')
-        company = request.form.get('company')
-        value = request.form.get('value')
-        source = request.form.get('source')
+    if request.method == "POST":
+        name = request.form["name"].strip()
+        email = request.form["email"].strip()
+        company = request.form["company"].strip()
+        phone = request.form["phone"].strip()
+        source = request.form["source"].strip()
 
-        if not all([name, email, company, value, source]):
-            flash('All fields are required!', 'error')
-            return redirect(url_for('add_lead'))
+        if not name or not email:
+            flash("Name and email are required.", "error")
+            return redirect(url_for("add_lead"))
 
-        try:
-            Lead.add_lead(name, email, company, float(value), source)
-            flash(f'Lead {name} added successfully!', 'success')
-        except ValueError:
-            flash('Deal value must be a number!', 'error')
+        lead = Lead(
+            name=name,
+            email=email,
+            company=company,
+            phone=phone,
+            source=source
+        )
 
-        return redirect(url_for('leads'))
-    return render_template('add_lead.html')
+        db.session.add(lead)
+        db.session.commit()
 
-@app.route('/leads/<int:lead_id>')
-def lead_detail(lead_id):
-    lead = Lead.get_lead_by_id(lead_id)
-    if not lead:
-        flash('Lead not found!', 'error')
-        return redirect(url_for('leads'))
-    return render_template('lead_detail.html', lead=lead)
+        flash("Lead added successfully.", "success")
+        return redirect(url_for("leads"))
 
-@app.route('/leads/<int:lead_id>/delete', methods=['POST'])
+    return render_template("add_lead.html")
+
+
+@app.route("/leads/<int:lead_id>/edit", methods=["GET", "POST"])
+@login_required
+@admin_required
+def edit_lead(lead_id):
+    lead = Lead.query.get_or_404(lead_id)
+
+    if request.method == "POST":
+        name = request.form["name"].strip()
+        email = request.form["email"].strip()
+        company = request.form["company"].strip()
+        phone = request.form["phone"].strip()
+        source = request.form["source"].strip()
+
+        if not name or not email:
+            flash("Name and email are required.", "error")
+            return redirect(url_for("edit_lead", lead_id=lead_id))
+
+        lead.name = name
+        lead.email = email
+        lead.company = company
+        lead.phone = phone
+        lead.source = source
+
+        db.session.commit()
+
+        flash("Lead updated successfully.", "success")
+        return redirect(url_for("leads"))
+
+    return render_template("edit_lead.html", lead=lead)
+
+
+@app.route("/leads/<int:lead_id>/delete", methods=["POST"])
+@login_required
+@admin_required
 def delete_lead(lead_id):
-    Lead.delete_lead(lead_id)
-    flash('Lead deleted successfully!', 'success')
-    return redirect(url_for('leads'))
+    lead = Lead.query.get_or_404(lead_id)
+
+    db.session.delete(lead)
+    db.session.commit()
+
+    flash("Lead deleted successfully.", "success")
+    return redirect(url_for("leads"))
+
+
+@app.route("/api/health", methods=["GET"])
+def api_health():
+    return jsonify({"status": "ok"}), 200
+
+
+@app.route("/api/customers", methods=["GET"])
+def api_get_customers():
+    customers = Customer.query.order_by(Customer.id.desc()).all()
+    return jsonify([customer.to_dict() for customer in customers]), 200
+
+
+@app.route("/api/customers/<int:customer_id>", methods=["GET"])
+def api_get_customer(customer_id):
+    customer = Customer.query.get(customer_id)
+
+    if not customer:
+        return jsonify({"error": "Customer not found"}), 404
+
+    return jsonify(customer.to_dict()), 200
+
+
+@app.route("/api/customers", methods=["POST"])
+def api_create_customer():
+    data = request.get_json(silent=True)
+
+    if not data:
+        return jsonify({"error": "Invalid or missing JSON body"}), 400
+
+    name = data.get("name", "").strip()
+    email = data.get("email", "").strip()
+    company = data.get("company", "").strip()
+    phone = data.get("phone", "").strip()
+    status = data.get("status", "prospect").strip()
+
+    if not name or not email:
+        return jsonify({"error": "Name and email are required"}), 400
+
+    customer = Customer(
+        name=name,
+        email=email,
+        company=company,
+        phone=phone,
+        status=status
+    )
+
+    db.session.add(customer)
+    db.session.commit()
+
+    return jsonify(customer.to_dict()), 201
+
+
+@app.route("/api/customers/<int:customer_id>", methods=["PUT"])
+def api_update_customer(customer_id):
+    customer = Customer.query.get(customer_id)
+
+    if not customer:
+        return jsonify({"error": "Customer not found"}), 404
+
+    data = request.get_json(silent=True)
+
+    if not data:
+        return jsonify({"error": "Invalid or missing JSON body"}), 400
+
+    name = data.get("name", customer.name).strip()
+    email = data.get("email", customer.email).strip()
+    company = data.get("company", customer.company or "").strip()
+    phone = data.get("phone", customer.phone or "").strip()
+    status = data.get("status", customer.status).strip()
+
+    if not name or not email:
+        return jsonify({"error": "Name and email are required"}), 400
+
+    customer.name = name
+    customer.email = email
+    customer.company = company
+    customer.phone = phone
+    customer.status = status
+
+    db.session.commit()
+
+    return jsonify(customer.to_dict()), 200
+
+
+@app.route("/api/customers/<int:customer_id>", methods=["DELETE"])
+def api_delete_customer(customer_id):
+    customer = Customer.query.get(customer_id)
+
+    if not customer:
+        return jsonify({"error": "Customer not found"}), 404
+
+    db.session.delete(customer)
+    db.session.commit()
+
+    return jsonify({"message": "Customer deleted successfully"}), 200
+
+
+@app.route("/api/leads", methods=["GET"])
+def api_get_leads():
+    leads = Lead.query.order_by(Lead.id.desc()).all()
+    return jsonify([lead.to_dict() for lead in leads]), 200
+
+
+@app.route("/api/leads/<int:lead_id>", methods=["GET"])
+def api_get_lead(lead_id):
+    lead = Lead.query.get(lead_id)
+
+    if not lead:
+        return jsonify({"error": "Lead not found"}), 404
+
+    return jsonify(lead.to_dict()), 200
+
+
+@app.route("/api/leads", methods=["POST"])
+def api_create_lead():
+    data = request.get_json(silent=True)
+
+    if not data:
+        return jsonify({"error": "Invalid or missing JSON body"}), 400
+
+    name = data.get("name", "").strip()
+    email = data.get("email", "").strip()
+    company = data.get("company", "").strip()
+    phone = data.get("phone", "").strip()
+    source = data.get("source", "").strip()
+
+    if not name or not email:
+        return jsonify({"error": "Name and email are required"}), 400
+
+    lead = Lead(
+        name=name,
+        email=email,
+        company=company,
+        phone=phone,
+        source=source
+    )
+
+    db.session.add(lead)
+    db.session.commit()
+
+    return jsonify(lead.to_dict()), 201
+
+
+@app.route("/api/leads/<int:lead_id>", methods=["PUT"])
+def api_update_lead(lead_id):
+    lead = Lead.query.get(lead_id)
+
+    if not lead:
+        return jsonify({"error": "Lead not found"}), 404
+
+    data = request.get_json(silent=True)
+
+    if not data:
+        return jsonify({"error": "Invalid or missing JSON body"}), 400
+
+    name = data.get("name", lead.name).strip()
+    email = data.get("email", lead.email).strip()
+    company = data.get("company", lead.company or "").strip()
+    phone = data.get("phone", lead.phone or "").strip()
+    source = data.get("source", lead.source or "").strip()
+
+    if not name or not email:
+        return jsonify({"error": "Name and email are required"}), 400
+
+    lead.name = name
+    lead.email = email
+    lead.company = company
+    lead.phone = phone
+    lead.source = source
+
+    db.session.commit()
+
+    return jsonify(lead.to_dict()), 200
+
+
+@app.route("/api/leads/<int:lead_id>", methods=["DELETE"])
+def api_delete_lead(lead_id):
+    lead = Lead.query.get(lead_id)
+
+    if not lead:
+        return jsonify({"error": "Lead not found"}), 404
+
+    db.session.delete(lead)
+    db.session.commit()
+
+    return jsonify({"message": "Lead deleted successfully"}), 200
+
+
+@app.errorhandler(403)
+def forbidden(error):
+    return render_template("500.html"), 403
+
 
 @app.errorhandler(404)
 def page_not_found(error):
-    return render_template('404.html'), 404
+    return render_template("404.html"), 404
+
 
 @app.errorhandler(500)
 def internal_error(error):
-    return render_template('500.html'), 500
+    return render_template("500.html"), 500
 
-if __name__ == '__main__':
-    app.run(debug=True, host='127.0.0.1', port=5000)
+
+if __name__ == "__main__":
+    with app.app_context():
+        db.create_all()
+    app.run(debug=True, host="127.0.0.1", port=5000)

@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}CRM{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
@@ -12,8 +12,21 @@
             <div class="nav-brand">CRM System</div>
             <ul class="nav-menu">
                 <li><a href="{{ url_for('index') }}" class="nav-link">Home</a></li>
-                <li><a href="{{ url_for('customers') }}" class="nav-link">Customers</a></li>
-                <li><a href="{{ url_for('leads') }}" class="nav-link">Leads</a></li>
+
+                {% if current_user.is_authenticated %}
+                    <li><a href="{{ url_for('customers') }}" class="nav-link">Customers</a></li>
+                    <li><a href="{{ url_for('leads') }}" class="nav-link">Leads</a></li>
+
+                    {% if current_user.is_admin() %}
+                        <li><a href="{{ url_for('add_customer') }}" class="nav-link">Add Customer</a></li>
+                        <li><a href="{{ url_for('add_lead') }}" class="nav-link">Add Lead</a></li>
+                    {% endif %}
+
+                    <li><a href="{{ url_for('logout') }}" class="nav-link">Logout</a></li>
+                {% else %}
+                    <li><a href="{{ url_for('login') }}" class="nav-link">Login</a></li>
+                    <li><a href="{{ url_for('register') }}" class="nav-link">Register</a></li>
+                {% endif %}
             </ul>
         </div>
     </nav>
@@ -26,7 +39,7 @@
                 {% endfor %}
             {% endif %}
         {% endwith %}
-        
+
         {% block content %}{% endblock %}
     </div>
 

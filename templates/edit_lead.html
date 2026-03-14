@@ -1,0 +1,42 @@
+{% extends 'base.html' %}
+
+{% block title %}Edit Lead - CRM{% endblock %}
+
+{% block content %}
+<h1>Edit Lead</h1>
+
+<form method="POST">
+    <div class="form-group">
+        <label for="name">Name:</label>
+        <input type="text" id="name" name="name" value="{{ lead.name }}" required>
+    </div>
+
+    <div class="form-group">
+        <label for="email">Email:</label>
+        <input type="email" id="email" name="email" value="{{ lead.email }}" required>
+    </div>
+
+    <div class="form-group">
+        <label for="company">Company:</label>
+        <input type="text" id="company" name="company" value="{{ lead.company }}">
+    </div>
+
+    <div class="form-group">
+        <label for="phone">Phone:</label>
+        <input type="text" id="phone" name="phone" value="{{ lead.phone }}">
+    </div>
+
+    <div class="form-group">
+        <label for="source">Source:</label>
+        <select id="source" name="source">
+            <option value="Website" {% if lead.source == 'Website' %}selected{% endif %}>Website</option>
+            <option value="Email" {% if lead.source == 'Email' %}selected{% endif %}>Email</option>
+            <option value="Referral" {% if lead.source == 'Referral' %}selected{% endif %}>Referral</option>
+            <option value="Phone Call" {% if lead.source == 'Phone Call' %}selected{% endif %}>Phone Call</option>
+            <option value="Social Media" {% if lead.source == 'Social Media' %}selected{% endif %}>Social Media</option>
+        </select>
+    </div>
+
+    <button type="submit" class="btn btn-primary">Save Changes</button>
+</form>
+{% endblock %}
