@@ -1,7 +1,12 @@
 from functools import wraps
-from flask import Flask, render_template, request, redirect, url_for, flash, abort, jsonify
+from io import BytesIO
+from flask import (
+    Flask, render_template, request, redirect, url_for,
+    flash, abort, jsonify, make_response, send_file
+)
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from flask_swagger_ui import get_swaggerui_blueprint
+import pandas as pd
 from models import db, Customer, Lead, User
 
 app = Flask(__name__)
@@ -22,9 +27,7 @@ API_URL = "/openapi.json"
 swaggerui_blueprint = get_swaggerui_blueprint(
     SWAGGER_URL,
     API_URL,
-    config={
-        "app_name": "CRM REST API"
-    }
+    config={"app_name": "CRM REST API"}
 )
 
 app.register_blueprint(swaggerui_blueprint, url_prefix=SWAGGER_URL)
@@ -48,6 +51,160 @@ def admin_required(f):
     return decorated_function
 
 
+def customer_dataframe():
+    customers = Customer.query.order_by(Customer.id.desc()).all()
+    data = [customer.to_dict() for customer in customers]
+    return pd.DataFrame(data)
+
+
+def lead_dataframe():
+    leads = Lead.query.order_by(Lead.id.desc()).all()
+    data = [lead.to_dict() for lead in leads]
+    return pd.DataFrame(data)
+
+
+def csv_download_response(df, filename):
+    csv_data = df.to_csv(index=False)
+    response = make_response(csv_data)
+    response.headers["Content-Disposition"] = f"attachment; filename={filename}"
+    response.headers["Content-Type"] = "text/csv; charset=utf-8"
+    return response
+
+
+def excel_download_response(df, filename):
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Data")
+    output.seek(0)
+
+    return send_file(
+        output,
+        as_attachment=True,
+        download_name=filename,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+
+def read_uploaded_table(uploaded_file):
+    filename = uploaded_file.filename.lower()
+
+    if filename.endswith(".csv"):
+        return pd.read_csv(uploaded_file), "csv"
+
+    if filename.endswith(".xlsx"):
+        return pd.read_excel(uploaded_file), "xlsx"
+
+    return None, None
+
+
+def normalize_value(value):
+    if pd.isna(value):
+        return ""
+    return str(value).strip()
+
+
+def import_customers_from_dataframe(df):
+    required_columns = {"name", "email"}
+    available_columns = {col.strip().lower() for col in df.columns}
+
+    if not required_columns.issubset(available_columns):
+        missing = sorted(required_columns - available_columns)
+        return {
+            "success": False,
+            "message": f"Missing required columns: {', '.join(missing)}"
+        }
+
+    df.columns = [col.strip().lower() for col in df.columns]
+
+    imported_count = 0
+    skipped_count = 0
+    errors = []
+
+    for index, row in df.iterrows():
+        name = normalize_value(row.get("name"))
+        email = normalize_value(row.get("email"))
+        company = normalize_value(row.get("company"))
+        phone = normalize_value(row.get("phone"))
+        status = normalize_value(row.get("status")) or "prospect"
+
+        if not name or not email:
+            skipped_count += 1
+            errors.append(f"Row {index + 2}: name and email are required")
+            continue
+
+        customer = Customer(
+            name=name,
+            email=email,
+            company=company,
+            phone=phone,
+            status=status
+        )
+        db.session.add(customer)
+        imported_count += 1
+
+    db.session.commit()
+
+    return {
+        "success": True,
+        "entity": "customers",
+        "imported_count": imported_count,
+        "skipped_count": skipped_count,
+        "total_rows": len(df),
+        "errors": errors
+    }
+
+
+def import_leads_from_dataframe(df):
+    required_columns = {"name", "email"}
+    available_columns = {col.strip().lower() for col in df.columns}
+
+    if not required_columns.issubset(available_columns):
+        missing = sorted(required_columns - available_columns)
+        return {
+            "success": False,
+            "message": f"Missing required columns: {', '.join(missing)}"
+        }
+
+    df.columns = [col.strip().lower() for col in df.columns]
+
+    imported_count = 0
+    skipped_count = 0
+    errors = []
+
+    for index, row in df.iterrows():
+        name = normalize_value(row.get("name"))
+        email = normalize_value(row.get("email"))
+        company = normalize_value(row.get("company"))
+        phone = normalize_value(row.get("phone"))
+        source = normalize_value(row.get("source"))
+
+        if not name or not email:
+            skipped_count += 1
+            errors.append(f"Row {index + 2}: name and email are required")
+            continue
+
+        lead = Lead(
+            name=name,
+            email=email,
+            company=company,
+            phone=phone,
+            source=source
+        )
+        db.session.add(lead)
+        imported_count += 1
+
+    db.session.commit()
+
+    return {
+        "success": True,
+        "entity": "leads",
+        "imported_count": imported_count,
+        "skipped_count": skipped_count,
+        "total_rows": len(df),
+        "errors": errors
+    }
+
+
 @app.route("/openapi.json", methods=["GET"])
 def openapi_spec():
     spec = {
@@ -57,9 +214,7 @@ def openapi_spec():
             "version": "1.0.0",
             "description": "API for managing customers and leads in the CRM system."
         },
-        "servers": [
-            {"url": "http://127.0.0.1:5000"}
-        ],
+        "servers": [{"url": "http://127.0.0.1:5000"}],
         "components": {
             "schemas": {
                 "Customer": {
@@ -601,6 +756,20 @@ def delete_customer(customer_id):
     return redirect(url_for("customers"))
 
 
+@app.route("/customers/export/csv")
+@login_required
+def export_customers_csv():
+    df = customer_dataframe()
+    return csv_download_response(df, "customers_export.csv")
+
+
+@app.route("/customers/export/excel")
+@login_required
+def export_customers_excel():
+    df = customer_dataframe()
+    return excel_download_response(df, "customers_export.xlsx")
+
+
 @app.route("/leads")
 @login_required
 def leads():
@@ -682,6 +851,59 @@ def delete_lead(lead_id):
 
     flash("Lead deleted successfully.", "success")
     return redirect(url_for("leads"))
+
+
+@app.route("/leads/export/csv")
+@login_required
+def export_leads_csv():
+    df = lead_dataframe()
+    return csv_download_response(df, "leads_export.csv")
+
+
+@app.route("/leads/export/excel")
+@login_required
+def export_leads_excel():
+    df = lead_dataframe()
+    return excel_download_response(df, "leads_export.xlsx")
+
+
+@app.route("/import", methods=["GET", "POST"])
+@login_required
+@admin_required
+def import_data():
+    if request.method == "POST":
+        entity = request.form.get("entity", "").strip()
+        uploaded_file = request.files.get("file")
+
+        if entity not in ["customers", "leads"]:
+            flash("Please choose a valid import type.", "error")
+            return redirect(url_for("import_data"))
+
+        if not uploaded_file or uploaded_file.filename == "":
+            flash("Please select a file.", "error")
+            return redirect(url_for("import_data"))
+
+        df, file_type = read_uploaded_table(uploaded_file)
+
+        if df is None:
+            flash("Only CSV and XLSX files are supported.", "error")
+            return redirect(url_for("import_data"))
+
+        if entity == "customers":
+            report = import_customers_from_dataframe(df)
+        else:
+            report = import_leads_from_dataframe(df)
+
+        if not report["success"]:
+            flash(report["message"], "error")
+            return redirect(url_for("import_data"))
+
+        report["file_type"] = file_type
+        report["filename"] = uploaded_file.filename
+
+        return render_template("import_report.html", report=report)
+
+    return render_template("import_data.html")
 
 
 @app.route("/api/health", methods=["GET"])

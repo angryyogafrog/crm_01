@@ -20,6 +20,7 @@
                     {% if current_user.is_admin() %}
                         <li><a href="{{ url_for('add_customer') }}" class="nav-link">Add Customer</a></li>
                         <li><a href="{{ url_for('add_lead') }}" class="nav-link">Add Lead</a></li>
+                        <li><a href="{{ url_for('import_data') }}" class="nav-link">Import Data</a></li>
                     {% endif %}
 
                     <li><a href="{{ url_for('logout') }}" class="nav-link">Logout</a></li>

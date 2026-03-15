@@ -1,0 +1,30 @@
+{% extends 'base.html' %}
+
+{% block title %}Import Data - CRM{% endblock %}
+
+{% block content %}
+<h1>Import Data</h1>
+
+<form method="POST" enctype="multipart/form-data">
+    <div class="form-group">
+        <label for="entity">Import type:</label>
+        <select id="entity" name="entity" required>
+            <option value="customers">Customers</option>
+            <option value="leads">Leads</option>
+        </select>
+    </div>
+
+    <div class="form-group">
+        <label for="file">Choose CSV or XLSX file:</label>
+        <input type="file" id="file" name="file" accept=".csv,.xlsx" required>
+    </div>
+
+    <button type="submit" class="btn btn-primary">Import</button>
+</form>
+
+<div style="margin-top: 30px;">
+    <h2>Expected columns</h2>
+    <p><strong>Customers:</strong> name, email, company, phone, status</p>
+    <p><strong>Leads:</strong> name, email, company, phone, source</p>
+</div>
+{% endblock %}

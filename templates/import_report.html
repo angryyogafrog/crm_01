@@ -1,0 +1,29 @@
+{% extends 'base.html' %}
+
+{% block title %}Import Report - CRM{% endblock %}
+
+{% block content %}
+<h1>Import Report</h1>
+
+<p><strong>File:</strong> {{ report.filename }}</p>
+<p><strong>Type:</strong> {{ report.file_type|upper }}</p>
+<p><strong>Entity:</strong> {{ report.entity }}</p>
+<p><strong>Total rows:</strong> {{ report.total_rows }}</p>
+<p><strong>Imported:</strong> {{ report.imported_count }}</p>
+<p><strong>Skipped:</strong> {{ report.skipped_count }}</p>
+
+{% if report.errors %}
+    <h2 style="margin-top: 20px;">Validation errors</h2>
+    <ul>
+        {% for error in report.errors %}
+            <li>{{ error }}</li>
+        {% endfor %}
+    </ul>
+{% else %}
+    <p style="margin-top: 20px;">No validation errors.</p>
+{% endif %}
+
+<p style="margin-top: 20px;">
+    <a href="{{ url_for('import_data') }}" class="btn btn-primary">Import another file</a>
+</p>
+{% endblock %}
