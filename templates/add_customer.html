@@ -1,40 +1,38 @@
 {% extends 'base.html' %}
 
-{% block title %}Add Customer - CRM{% endblock %}
-
 {% block content %}
 <h1>Add Customer</h1>
 
 <form method="POST">
     <div class="form-group">
-        <label for="name">Name:</label>
-        <input type="text" id="name" name="name" required>
+        <label>Name:</label>
+        <input type="text" name="name" required>
     </div>
-
+    
     <div class="form-group">
-        <label for="email">Email:</label>
-        <input type="email" id="email" name="email" required>
+        <label>Email:</label>
+        <input type="email" name="email" required>
     </div>
-
+    
     <div class="form-group">
-        <label for="company">Company:</label>
-        <input type="text" id="company" name="company">
+        <label>Company:</label>
+        <input type="text" name="company" required>
     </div>
-
+    
     <div class="form-group">
-        <label for="phone">Phone:</label>
-        <input type="text" id="phone" name="phone">
+        <label>Phone:</label>
+        <input type="text" name="phone" required>
     </div>
-
+    
     <div class="form-group">
-        <label for="status">Status:</label>
-        <select id="status" name="status">
-            <option value="prospect">prospect</option>
-            <option value="active">active</option>
-            <option value="inactive">inactive</option>
+        <label>Status:</label>
+        <select name="status">
+            <option>prospect</option>
+            <option>active</option>
+            <option>inactive</option>
         </select>
     </div>
-
+    
     <button type="submit" class="btn btn-primary">Add Customer</button>
 </form>
 {% endblock %}

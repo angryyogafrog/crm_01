@@ -1,23 +1,22 @@
-{% extends 'base.html' %}
+{% extends "base.html" %}
 
-{% block title %}Login - CRM{% endblock %}
+{% block title %}Login{% endblock %}
 
 {% block content %}
-<div class="form-container">
-    <h1>Login</h1>
+<h1>Login</h1>
 
-    <form method="POST" action="{{ url_for('login') }}">
-        <div class="form-group">
-            <label for="username">Username</label>
-            <input type="text" id="username" name="username" required>
-        </div>
+<form method="POST">
+    <label>Username:</label>
+    <input type="text" name="username" required>
 
-        <div class="form-group">
-            <label for="password">Password</label>
-            <input type="password" id="password" name="password" required>
-        </div>
+    <label>Password:</label>
+    <input type="password" name="password" required>
 
-        <button type="submit" class="btn btn-primary">Login</button>
-    </form>
-</div>
+    <button type="submit">Login</button>
+</form>
+
+<p style="margin-top: 18px;">
+    No account yet?
+    <a class="small-link" href="{{ url_for('register') }}">Register here</a>
+</p>
 {% endblock %}

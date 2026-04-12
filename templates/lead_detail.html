@@ -1,0 +1,17 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<h1>{{ lead.name }}</h1>
+
+<p><strong>Email:</strong> {{ lead.email }}</p>
+<p><strong>Company:</strong> {{ lead.company }}</p>
+<p><strong>Value:</strong> ${{ lead.value }}</p>
+<p><strong>Source:</strong> {{ lead.source }}</p>
+
+<p>
+    <form method="POST" action="{{ url_for('delete_lead', lead_id=lead.id) }}" style="display:inline">
+        <button type="submit" class="btn btn-danger" onclick="return confirm('Delete?')">Delete</button>
+    </form>
+    <a href="{{ url_for('leads') }}" class="btn btn-primary">Back</a>
+</p>
+{% endblock %}

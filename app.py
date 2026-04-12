@@ -1,36 +1,46 @@
-from functools import wraps
-from io import BytesIO
-from flask import (
-    Flask, render_template, request, redirect, url_for,
-    flash, abort, jsonify, make_response, send_file
-)
-from flask_login import LoginManager, login_user, logout_user, login_required, current_user
-from flask_swagger_ui import get_swaggerui_blueprint
+from flask import Flask, render_template, request, redirect, url_for, flash, Blueprint, send_file
+from flask_login import LoginManager, login_user, login_required, logout_user, current_user
+from flask_restx import Api, Resource, fields
+from werkzeug.utils import secure_filename
+from models import db, User, Customer, Lead
+import os
+import io
 import pandas as pd
-from models import db, Customer, Lead, User
 
 app = Flask(__name__)
-app.config["SECRET_KEY"] = "super_secret_key_change_this"
+app.url_map.strict_slashes = False
+app.config["SECRET_KEY"] = "super-secret-key"
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///crm.db"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+app.config["UPLOAD_FOLDER"] = "uploads"
+app.config["MAX_CONTENT_LENGTH"] = 5 * 1024 * 1024  # 5 MB
+
+ALLOWED_EXTENSIONS = {"csv", "xlsx"}
 
 db.init_app(app)
 
 login_manager = LoginManager()
-login_manager.login_view = "login"
-login_manager.login_message = "Please log in first."
 login_manager.init_app(app)
+login_manager.login_view = "login"
 
-SWAGGER_URL = "/api/docs"
-API_URL = "/openapi.json"
+os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
 
-swaggerui_blueprint = get_swaggerui_blueprint(
-    SWAGGER_URL,
-    API_URL,
-    config={"app_name": "CRM REST API"}
-)
 
-app.register_blueprint(swaggerui_blueprint, url_prefix=SWAGGER_URL)
+def allowed_file(filename):
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def normalize_status(value):
+    value = str(value).strip().lower()
+    if value in {"prospect", "active", "inactive"}:
+        return value
+    return "prospect"
+
+
+def clean_value(value):
+    if pd.isna(value):
+        return ""
+    return str(value).strip()
 
 
 @login_manager.user_loader
@@ -38,609 +48,53 @@ def load_user(user_id):
     return User.query.get(int(user_id))
 
 
-def admin_required(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if not current_user.is_authenticated:
-            return login_manager.unauthorized()
-
-        if not current_user.is_admin():
-            abort(403)
-
-        return f(*args, **kwargs)
-    return decorated_function
-
-
-def customer_dataframe():
-    customers = Customer.query.order_by(Customer.id.desc()).all()
-    data = [customer.to_dict() for customer in customers]
-    return pd.DataFrame(data)
-
-
-def lead_dataframe():
-    leads = Lead.query.order_by(Lead.id.desc()).all()
-    data = [lead.to_dict() for lead in leads]
-    return pd.DataFrame(data)
-
-
-def csv_download_response(df, filename):
-    csv_data = df.to_csv(index=False)
-    response = make_response(csv_data)
-    response.headers["Content-Disposition"] = f"attachment; filename={filename}"
-    response.headers["Content-Type"] = "text/csv; charset=utf-8"
-    return response
-
-
-def excel_download_response(df, filename):
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="Data")
-    output.seek(0)
-
-    return send_file(
-        output,
-        as_attachment=True,
-        download_name=filename,
-        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
-
-
-def read_uploaded_table(uploaded_file):
-    filename = uploaded_file.filename.lower()
-
-    if filename.endswith(".csv"):
-        return pd.read_csv(uploaded_file), "csv"
-
-    if filename.endswith(".xlsx"):
-        return pd.read_excel(uploaded_file), "xlsx"
-
-    return None, None
-
-
-def normalize_value(value):
-    if pd.isna(value):
-        return ""
-    return str(value).strip()
-
-
-def import_customers_from_dataframe(df):
-    required_columns = {"name", "email"}
-    available_columns = {col.strip().lower() for col in df.columns}
-
-    if not required_columns.issubset(available_columns):
-        missing = sorted(required_columns - available_columns)
-        return {
-            "success": False,
-            "message": f"Missing required columns: {', '.join(missing)}"
-        }
-
-    df.columns = [col.strip().lower() for col in df.columns]
-
-    imported_count = 0
-    skipped_count = 0
-    errors = []
-
-    for index, row in df.iterrows():
-        name = normalize_value(row.get("name"))
-        email = normalize_value(row.get("email"))
-        company = normalize_value(row.get("company"))
-        phone = normalize_value(row.get("phone"))
-        status = normalize_value(row.get("status")) or "prospect"
-
-        if not name or not email:
-            skipped_count += 1
-            errors.append(f"Row {index + 2}: name and email are required")
-            continue
-
-        customer = Customer(
-            name=name,
-            email=email,
-            company=company,
-            phone=phone,
-            status=status
-        )
-        db.session.add(customer)
-        imported_count += 1
-
-    db.session.commit()
-
-    return {
-        "success": True,
-        "entity": "customers",
-        "imported_count": imported_count,
-        "skipped_count": skipped_count,
-        "total_rows": len(df),
-        "errors": errors
-    }
-
-
-def import_leads_from_dataframe(df):
-    required_columns = {"name", "email"}
-    available_columns = {col.strip().lower() for col in df.columns}
-
-    if not required_columns.issubset(available_columns):
-        missing = sorted(required_columns - available_columns)
-        return {
-            "success": False,
-            "message": f"Missing required columns: {', '.join(missing)}"
-        }
-
-    df.columns = [col.strip().lower() for col in df.columns]
-
-    imported_count = 0
-    skipped_count = 0
-    errors = []
-
-    for index, row in df.iterrows():
-        name = normalize_value(row.get("name"))
-        email = normalize_value(row.get("email"))
-        company = normalize_value(row.get("company"))
-        phone = normalize_value(row.get("phone"))
-        source = normalize_value(row.get("source"))
-
-        if not name or not email:
-            skipped_count += 1
-            errors.append(f"Row {index + 2}: name and email are required")
-            continue
-
-        lead = Lead(
-            name=name,
-            email=email,
-            company=company,
-            phone=phone,
-            source=source
-        )
-        db.session.add(lead)
-        imported_count += 1
-
-    db.session.commit()
-
-    return {
-        "success": True,
-        "entity": "leads",
-        "imported_count": imported_count,
-        "skipped_count": skipped_count,
-        "total_rows": len(df),
-        "errors": errors
-    }
-
-
-@app.route("/openapi.json", methods=["GET"])
-def openapi_spec():
-    spec = {
-        "openapi": "3.0.3",
-        "info": {
-            "title": "CRM REST API",
-            "version": "1.0.0",
-            "description": "API for managing customers and leads in the CRM system."
-        },
-        "servers": [{"url": "http://127.0.0.1:5000"}],
-        "components": {
-            "schemas": {
-                "Customer": {
-                    "type": "object",
-                    "properties": {
-                        "id": {"type": "integer", "example": 1},
-                        "name": {"type": "string", "example": "Anna Nowak"},
-                        "email": {"type": "string", "example": "anna@test.com"},
-                        "company": {"type": "string", "example": "Test Company"},
-                        "phone": {"type": "string", "example": "123456789"},
-                        "status": {"type": "string", "example": "prospect"}
-                    }
-                },
-                "CustomerInput": {
-                    "type": "object",
-                    "required": ["name", "email"],
-                    "properties": {
-                        "name": {"type": "string", "example": "Anna Nowak"},
-                        "email": {"type": "string", "example": "anna@test.com"},
-                        "company": {"type": "string", "example": "Test Company"},
-                        "phone": {"type": "string", "example": "123456789"},
-                        "status": {"type": "string", "example": "prospect"}
-                    }
-                },
-                "Lead": {
-                    "type": "object",
-                    "properties": {
-                        "id": {"type": "integer", "example": 1},
-                        "name": {"type": "string", "example": "Max Mustermann"},
-                        "email": {"type": "string", "example": "max@test.com"},
-                        "company": {"type": "string", "example": "Demo GmbH"},
-                        "phone": {"type": "string", "example": "987654321"},
-                        "source": {"type": "string", "example": "Website"}
-                    }
-                },
-                "LeadInput": {
-                    "type": "object",
-                    "required": ["name", "email"],
-                    "properties": {
-                        "name": {"type": "string", "example": "Max Mustermann"},
-                        "email": {"type": "string", "example": "max@test.com"},
-                        "company": {"type": "string", "example": "Demo GmbH"},
-                        "phone": {"type": "string", "example": "987654321"},
-                        "source": {"type": "string", "example": "Website"}
-                    }
-                },
-                "Health": {
-                    "type": "object",
-                    "properties": {
-                        "status": {"type": "string", "example": "ok"}
-                    }
-                },
-                "Message": {
-                    "type": "object",
-                    "properties": {
-                        "message": {"type": "string", "example": "Deleted successfully"}
-                    }
-                },
-                "Error": {
-                    "type": "object",
-                    "properties": {
-                        "error": {"type": "string", "example": "Customer not found"}
-                    }
-                }
-            }
-        },
-        "paths": {
-            "/api/health": {
-                "get": {
-                    "summary": "Health check",
-                    "responses": {
-                        "200": {
-                            "description": "API is running",
-                            "content": {
-                                "application/json": {
-                                    "schema": {"$ref": "#/components/schemas/Health"}
-                                }
-                            }
-                        }
-                    }
-                }
-            },
-            "/api/customers": {
-                "get": {
-                    "summary": "Get all customers",
-                    "responses": {
-                        "200": {
-                            "description": "List of customers",
-                            "content": {
-                                "application/json": {
-                                    "schema": {
-                                        "type": "array",
-                                        "items": {"$ref": "#/components/schemas/Customer"}
-                                    }
-                                }
-                            }
-                        }
-                    }
-                },
-                "post": {
-                    "summary": "Create customer",
-                    "requestBody": {
-                        "required": True,
-                        "content": {
-                            "application/json": {
-                                "schema": {"$ref": "#/components/schemas/CustomerInput"}
-                            }
-                        }
-                    },
-                    "responses": {
-                        "201": {
-                            "description": "Customer created",
-                            "content": {
-                                "application/json": {
-                                    "schema": {"$ref": "#/components/schemas/Customer"}
-                                }
-                            }
-                        },
-                        "400": {
-                            "description": "Invalid input",
-                            "content": {
-                                "application/json": {
-                                    "schema": {"$ref": "#/components/schemas/Error"}
-                                }
-                            }
-                        }
-                    }
-                }
-            },
-            "/api/customers/{customer_id}": {
-                "get": {
-                    "summary": "Get customer by ID",
-                    "parameters": [
-                        {
-                            "name": "customer_id",
-                            "in": "path",
-                            "required": True,
-                            "schema": {"type": "integer"}
-                        }
-                    ],
-                    "responses": {
-                        "200": {
-                            "description": "Customer found",
-                            "content": {
-                                "application/json": {
-                                    "schema": {"$ref": "#/components/schemas/Customer"}
-                                }
-                            }
-                        },
-                        "404": {
-                            "description": "Customer not found",
-                            "content": {
-                                "application/json": {
-                                    "schema": {"$ref": "#/components/schemas/Error"}
-                                }
-                            }
-                        }
-                    }
-                },
-                "put": {
-                    "summary": "Update customer",
-                    "parameters": [
-                        {
-                            "name": "customer_id",
-                            "in": "path",
-                            "required": True,
-                            "schema": {"type": "integer"}
-                        }
-                    ],
-                    "requestBody": {
-                        "required": True,
-                        "content": {
-                            "application/json": {
-                                "schema": {"$ref": "#/components/schemas/CustomerInput"}
-                            }
-                        }
-                    },
-                    "responses": {
-                        "200": {
-                            "description": "Customer updated",
-                            "content": {
-                                "application/json": {
-                                    "schema": {"$ref": "#/components/schemas/Customer"}
-                                }
-                            }
-                        },
-                        "400": {
-                            "description": "Invalid input",
-                            "content": {
-                                "application/json": {
-                                    "schema": {"$ref": "#/components/schemas/Error"}
-                                }
-                            }
-                        },
-                        "404": {
-                            "description": "Customer not found",
-                            "content": {
-                                "application/json": {
-                                    "schema": {"$ref": "#/components/schemas/Error"}
-                                }
-                            }
-                        }
-                    }
-                },
-                "delete": {
-                    "summary": "Delete customer",
-                    "parameters": [
-                        {
-                            "name": "customer_id",
-                            "in": "path",
-                            "required": True,
-                            "schema": {"type": "integer"}
-                        }
-                    ],
-                    "responses": {
-                        "200": {
-                            "description": "Customer deleted",
-                            "content": {
-                                "application/json": {
-                                    "schema": {"$ref": "#/components/schemas/Message"}
-                                }
-                            }
-                        },
-                        "404": {
-                            "description": "Customer not found",
-                            "content": {
-                                "application/json": {
-                                    "schema": {"$ref": "#/components/schemas/Error"}
-                                }
-                            }
-                        }
-                    }
-                }
-            },
-            "/api/leads": {
-                "get": {
-                    "summary": "Get all leads",
-                    "responses": {
-                        "200": {
-                            "description": "List of leads",
-                            "content": {
-                                "application/json": {
-                                    "schema": {
-                                        "type": "array",
-                                        "items": {"$ref": "#/components/schemas/Lead"}
-                                    }
-                                }
-                            }
-                        }
-                    }
-                },
-                "post": {
-                    "summary": "Create lead",
-                    "requestBody": {
-                        "required": True,
-                        "content": {
-                            "application/json": {
-                                "schema": {"$ref": "#/components/schemas/LeadInput"}
-                            }
-                        }
-                    },
-                    "responses": {
-                        "201": {
-                            "description": "Lead created",
-                            "content": {
-                                "application/json": {
-                                    "schema": {"$ref": "#/components/schemas/Lead"}
-                                }
-                            }
-                        },
-                        "400": {
-                            "description": "Invalid input",
-                            "content": {
-                                "application/json": {
-                                    "schema": {"$ref": "#/components/schemas/Error"}
-                                }
-                            }
-                        }
-                    }
-                }
-            },
-            "/api/leads/{lead_id}": {
-                "get": {
-                    "summary": "Get lead by ID",
-                    "parameters": [
-                        {
-                            "name": "lead_id",
-                            "in": "path",
-                            "required": True,
-                            "schema": {"type": "integer"}
-                        }
-                    ],
-                    "responses": {
-                        "200": {
-                            "description": "Lead found",
-                            "content": {
-                                "application/json": {
-                                    "schema": {"$ref": "#/components/schemas/Lead"}
-                                }
-                            }
-                        },
-                        "404": {
-                            "description": "Lead not found",
-                            "content": {
-                                "application/json": {
-                                    "schema": {"$ref": "#/components/schemas/Error"}
-                                }
-                            }
-                        }
-                    }
-                },
-                "put": {
-                    "summary": "Update lead",
-                    "parameters": [
-                        {
-                            "name": "lead_id",
-                            "in": "path",
-                            "required": True,
-                            "schema": {"type": "integer"}
-                        }
-                    ],
-                    "requestBody": {
-                        "required": True,
-                        "content": {
-                            "application/json": {
-                                "schema": {"$ref": "#/components/schemas/LeadInput"}
-                            }
-                        }
-                    },
-                    "responses": {
-                        "200": {
-                            "description": "Lead updated",
-                            "content": {
-                                "application/json": {
-                                    "schema": {"$ref": "#/components/schemas/Lead"}
-                                }
-                            }
-                        },
-                        "400": {
-                            "description": "Invalid input",
-                            "content": {
-                                "application/json": {
-                                    "schema": {"$ref": "#/components/schemas/Error"}
-                                }
-                            }
-                        },
-                        "404": {
-                            "description": "Lead not found",
-                            "content": {
-                                "application/json": {
-                                    "schema": {"$ref": "#/components/schemas/Error"}
-                                }
-                            }
-                        }
-                    }
-                },
-                "delete": {
-                    "summary": "Delete lead",
-                    "parameters": [
-                        {
-                            "name": "lead_id",
-                            "in": "path",
-                            "required": True,
-                            "schema": {"type": "integer"}
-                        }
-                    ],
-                    "responses": {
-                        "200": {
-                            "description": "Lead deleted",
-                            "content": {
-                                "application/json": {
-                                    "schema": {"$ref": "#/components/schemas/Message"}
-                                }
-                            }
-                        },
-                        "404": {
-                            "description": "Lead not found",
-                            "content": {
-                                "application/json": {
-                                    "schema": {"$ref": "#/components/schemas/Error"}
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    return jsonify(spec)
+with app.app_context():
+    db.create_all()
 
 
 @app.route("/")
+@login_required
 def index():
-    return render_template("index.html")
+    total_customers = Customer.query.count()
+    total_leads = Lead.query.count()
+    return render_template("index.html", total_customers=total_customers, total_leads=total_leads)
+
+
+@app.route("/api/docs/")
+def api_docs_redirect():
+    return redirect("/api/docs")
 
 
 @app.route("/register", methods=["GET", "POST"])
 def register():
+    if current_user.is_authenticated:
+        return redirect(url_for("index"))
+
     if request.method == "POST":
         username = request.form["username"].strip()
+        email = request.form["email"].strip()
         password = request.form["password"]
         confirm_password = request.form["confirm_password"]
 
-        if not username or not password or not confirm_password:
-            flash("All fields are required.", "error")
-            return redirect(url_for("register"))
-
         if password != confirm_password:
-            flash("Passwords do not match.", "error")
+            flash("Passwords do not match.")
             return redirect(url_for("register"))
 
-        existing_user = User.query.filter_by(username=username).first()
+        existing_user = User.query.filter(
+            (User.username == username) | (User.email == email)
+        ).first()
+
         if existing_user:
-            flash("Username already exists.", "error")
+            flash("Username or email already exists.")
             return redirect(url_for("register"))
 
-        user_count = User.query.count()
-        role = "admin" if user_count == 0 else "user"
-
-        user = User(username=username, role=role)
+        user = User(username=username, email=email)
         user.set_password(password)
 
         db.session.add(user)
         db.session.commit()
 
-        flash("Registration successful. You can now log in.", "success")
+        flash("Registration successful.")
         return redirect(url_for("login"))
 
     return render_template("register.html")
@@ -648,6 +102,9 @@ def register():
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    if current_user.is_authenticated:
+        return redirect(url_for("index"))
+
     if request.method == "POST":
         username = request.form["username"].strip()
         password = request.form["password"]
@@ -656,10 +113,9 @@ def login():
 
         if user and user.check_password(password):
             login_user(user)
-            flash("Logged in successfully.", "success")
-            return redirect(url_for("customers"))
+            return redirect(url_for("index"))
 
-        flash("Invalid username or password.", "error")
+        flash("Invalid username or password.")
         return redirect(url_for("login"))
 
     return render_template("login.html")
@@ -669,30 +125,87 @@ def login():
 @login_required
 def logout():
     logout_user()
-    flash("Logged out successfully.", "success")
-    return redirect(url_for("index"))
+    return redirect(url_for("login"))
 
 
 @app.route("/customers")
 @login_required
 def customers():
-    all_customers = Customer.query.order_by(Customer.id.desc()).all()
-    return render_template("customers.html", customers=all_customers)
+    customers = Customer.query.all()
+    return render_template("customers.html", customers=customers)
+
+
+@app.route("/customers/export/csv")
+@login_required
+def export_customers_csv():
+    customers = Customer.query.all()
+
+    data = []
+    for c in customers:
+        data.append({
+            "name": c.name,
+            "email": c.email,
+            "company": c.company,
+            "phone": c.phone,
+            "status": c.status
+        })
+
+    df = pd.DataFrame(data)
+
+    output = io.StringIO()
+    df.to_csv(output, index=False)
+    output.seek(0)
+
+    return send_file(
+        io.BytesIO(output.getvalue().encode("utf-8")),
+        mimetype="text/csv",
+        as_attachment=True,
+        download_name="customers_export.csv"
+    )
+
+
+@app.route("/customers/export/xlsx")
+@login_required
+def export_customers_xlsx():
+    customers = Customer.query.all()
+
+    data = []
+    for c in customers:
+        data.append({
+            "name": c.name,
+            "email": c.email,
+            "company": c.company,
+            "phone": c.phone,
+            "status": c.status
+        })
+
+    df = pd.DataFrame(data)
+
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Customers")
+    output.seek(0)
+
+    return send_file(
+        output,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name="customers_export.xlsx"
+    )
 
 
 @app.route("/customers/add", methods=["GET", "POST"])
 @login_required
-@admin_required
 def add_customer():
     if request.method == "POST":
-        name = request.form["name"].strip()
-        email = request.form["email"].strip()
-        company = request.form["company"].strip()
-        phone = request.form["phone"].strip()
-        status = request.form["status"].strip()
+        name = request.form.get("name", "").strip()
+        email = request.form.get("email", "").strip()
+        company = request.form.get("company", "").strip()
+        phone = request.form.get("phone", "").strip()
+        status = request.form.get("status", "prospect").strip()
 
-        if not name or not email:
-            flash("Name and email are required.", "error")
+        if not all([name, email, company, phone]):
+            flash("All fields are required.")
             return redirect(url_for("add_customer"))
 
         customer = Customer(
@@ -702,400 +215,363 @@ def add_customer():
             phone=phone,
             status=status
         )
-
         db.session.add(customer)
         db.session.commit()
 
-        flash("Customer added successfully.", "success")
+        flash("Customer added successfully.")
         return redirect(url_for("customers"))
 
     return render_template("add_customer.html")
 
 
+@app.route("/customers/import", methods=["GET", "POST"])
+@login_required
+def import_customers():
+    if request.method == "POST":
+        if "file" not in request.files:
+            flash("No file selected.")
+            return redirect(url_for("import_customers"))
+
+        file = request.files["file"]
+
+        if file.filename == "":
+            flash("No file selected.")
+            return redirect(url_for("import_customers"))
+
+        if not allowed_file(file.filename):
+            flash("Only .csv and .xlsx files are allowed.")
+            return redirect(url_for("import_customers"))
+
+        filename = secure_filename(file.filename)
+        filepath = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+
+        try:
+            file.save(filepath)
+
+            if filename.lower().endswith(".csv"):
+                df = pd.read_csv(filepath)
+            else:
+                df = pd.read_excel(filepath, engine="openpyxl")
+
+            df.columns = [str(col).strip().lower() for col in df.columns]
+
+            required_columns = ["name", "email", "company", "phone", "status"]
+            missing_columns = [col for col in required_columns if col not in df.columns]
+
+            if missing_columns:
+                flash("Missing required columns: " + ", ".join(missing_columns))
+                return redirect(url_for("import_customers"))
+
+            imported_count = 0
+            skipped_count = 0
+
+            for _, row in df.iterrows():
+                name = clean_value(row.get("name"))
+                email = clean_value(row.get("email"))
+                company = clean_value(row.get("company"))
+                phone = clean_value(row.get("phone"))
+                status = normalize_status(row.get("status"))
+
+                if not all([name, email, company, phone]):
+                    skipped_count += 1
+                    continue
+
+                customer = Customer(
+                    name=name,
+                    email=email,
+                    company=company,
+                    phone=phone,
+                    status=status
+                )
+                db.session.add(customer)
+                imported_count += 1
+
+            db.session.commit()
+            flash(f"Import completed. Added: {imported_count}, skipped: {skipped_count}.")
+            return redirect(url_for("customers"))
+
+        except Exception as e:
+            flash(f"Import failed: {str(e)}")
+            return redirect(url_for("import_customers"))
+
+        finally:
+            if os.path.exists(filepath):
+                os.remove(filepath)
+
+    return render_template("import_customers.html")
+
+
+@app.route("/customers/<int:customer_id>")
+@login_required
+def customer_detail(customer_id):
+    customer = Customer.query.get(customer_id)
+    if not customer:
+        flash("Customer not found.")
+        return redirect(url_for("customers"))
+    return render_template("customer_detail.html", customer=customer)
+
+
 @app.route("/customers/<int:customer_id>/edit", methods=["GET", "POST"])
 @login_required
-@admin_required
 def edit_customer(customer_id):
-    customer = Customer.query.get_or_404(customer_id)
+    customer = Customer.query.get(customer_id)
+    if not customer:
+        flash("Customer not found.")
+        return redirect(url_for("customers"))
 
     if request.method == "POST":
-        name = request.form["name"].strip()
-        email = request.form["email"].strip()
-        company = request.form["company"].strip()
-        phone = request.form["phone"].strip()
-        status = request.form["status"].strip()
-
-        if not name or not email:
-            flash("Name and email are required.", "error")
-            return redirect(url_for("edit_customer", customer_id=customer_id))
-
-        customer.name = name
-        customer.email = email
-        customer.company = company
-        customer.phone = phone
-        customer.status = status
+        customer.name = request.form.get("name", "").strip()
+        customer.email = request.form.get("email", "").strip()
+        customer.company = request.form.get("company", "").strip()
+        customer.phone = request.form.get("phone", "").strip()
+        customer.status = request.form.get("status", "prospect").strip()
 
         db.session.commit()
-
-        flash("Customer updated successfully.", "success")
-        return redirect(url_for("customers"))
+        flash("Customer updated successfully.")
+        return redirect(url_for("customer_detail", customer_id=customer.id))
 
     return render_template("edit_customer.html", customer=customer)
 
 
 @app.route("/customers/<int:customer_id>/delete", methods=["POST"])
 @login_required
-@admin_required
 def delete_customer(customer_id):
-    customer = Customer.query.get_or_404(customer_id)
-
-    db.session.delete(customer)
-    db.session.commit()
-
-    flash("Customer deleted successfully.", "success")
+    customer = Customer.query.get(customer_id)
+    if customer:
+        db.session.delete(customer)
+        db.session.commit()
+        flash("Customer deleted successfully.")
     return redirect(url_for("customers"))
-
-
-@app.route("/customers/export/csv")
-@login_required
-def export_customers_csv():
-    df = customer_dataframe()
-    return csv_download_response(df, "customers_export.csv")
-
-
-@app.route("/customers/export/excel")
-@login_required
-def export_customers_excel():
-    df = customer_dataframe()
-    return excel_download_response(df, "customers_export.xlsx")
 
 
 @app.route("/leads")
 @login_required
 def leads():
-    all_leads = Lead.query.order_by(Lead.id.desc()).all()
-    return render_template("leads.html", leads=all_leads)
+    leads = Lead.query.all()
+    return render_template("leads.html", leads=leads)
 
 
 @app.route("/leads/add", methods=["GET", "POST"])
 @login_required
-@admin_required
 def add_lead():
     if request.method == "POST":
-        name = request.form["name"].strip()
-        email = request.form["email"].strip()
-        company = request.form["company"].strip()
-        phone = request.form["phone"].strip()
-        source = request.form["source"].strip()
+        name = request.form.get("name", "").strip()
+        email = request.form.get("email", "").strip()
+        company = request.form.get("company", "").strip()
+        value = request.form.get("value", "").strip()
+        source = request.form.get("source", "").strip()
 
-        if not name or not email:
-            flash("Name and email are required.", "error")
+        if not all([name, email, company, value, source]):
+            flash("All fields are required.")
+            return redirect(url_for("add_lead"))
+
+        try:
+            value = float(value)
+        except ValueError:
+            flash("Value must be a number.")
             return redirect(url_for("add_lead"))
 
         lead = Lead(
             name=name,
             email=email,
             company=company,
-            phone=phone,
+            value=value,
             source=source
         )
-
         db.session.add(lead)
         db.session.commit()
 
-        flash("Lead added successfully.", "success")
+        flash("Lead added successfully.")
         return redirect(url_for("leads"))
 
     return render_template("add_lead.html")
 
 
-@app.route("/leads/<int:lead_id>/edit", methods=["GET", "POST"])
+@app.route("/leads/<int:lead_id>")
 @login_required
-@admin_required
-def edit_lead(lead_id):
-    lead = Lead.query.get_or_404(lead_id)
-
-    if request.method == "POST":
-        name = request.form["name"].strip()
-        email = request.form["email"].strip()
-        company = request.form["company"].strip()
-        phone = request.form["phone"].strip()
-        source = request.form["source"].strip()
-
-        if not name or not email:
-            flash("Name and email are required.", "error")
-            return redirect(url_for("edit_lead", lead_id=lead_id))
-
-        lead.name = name
-        lead.email = email
-        lead.company = company
-        lead.phone = phone
-        lead.source = source
-
-        db.session.commit()
-
-        flash("Lead updated successfully.", "success")
+def lead_detail(lead_id):
+    lead = Lead.query.get(lead_id)
+    if not lead:
+        flash("Lead not found.")
         return redirect(url_for("leads"))
-
-    return render_template("edit_lead.html", lead=lead)
+    return render_template("lead_detail.html", lead=lead)
 
 
 @app.route("/leads/<int:lead_id>/delete", methods=["POST"])
 @login_required
-@admin_required
 def delete_lead(lead_id):
-    lead = Lead.query.get_or_404(lead_id)
-
-    db.session.delete(lead)
-    db.session.commit()
-
-    flash("Lead deleted successfully.", "success")
+    lead = Lead.query.get(lead_id)
+    if lead:
+        db.session.delete(lead)
+        db.session.commit()
+        flash("Lead deleted successfully.")
     return redirect(url_for("leads"))
 
 
-@app.route("/leads/export/csv")
-@login_required
-def export_leads_csv():
-    df = lead_dataframe()
-    return csv_download_response(df, "leads_export.csv")
-
-
-@app.route("/leads/export/excel")
-@login_required
-def export_leads_excel():
-    df = lead_dataframe()
-    return excel_download_response(df, "leads_export.xlsx")
-
-
-@app.route("/import", methods=["GET", "POST"])
-@login_required
-@admin_required
-def import_data():
-    if request.method == "POST":
-        entity = request.form.get("entity", "").strip()
-        uploaded_file = request.files.get("file")
-
-        if entity not in ["customers", "leads"]:
-            flash("Please choose a valid import type.", "error")
-            return redirect(url_for("import_data"))
-
-        if not uploaded_file or uploaded_file.filename == "":
-            flash("Please select a file.", "error")
-            return redirect(url_for("import_data"))
-
-        df, file_type = read_uploaded_table(uploaded_file)
-
-        if df is None:
-            flash("Only CSV and XLSX files are supported.", "error")
-            return redirect(url_for("import_data"))
-
-        if entity == "customers":
-            report = import_customers_from_dataframe(df)
-        else:
-            report = import_leads_from_dataframe(df)
-
-        if not report["success"]:
-            flash(report["message"], "error")
-            return redirect(url_for("import_data"))
-
-        report["file_type"] = file_type
-        report["filename"] = uploaded_file.filename
-
-        return render_template("import_report.html", report=report)
-
-    return render_template("import_data.html")
-
-
-@app.route("/api/health", methods=["GET"])
-def api_health():
-    return jsonify({"status": "ok"}), 200
-
-
-@app.route("/api/customers", methods=["GET"])
-def api_get_customers():
-    customers = Customer.query.order_by(Customer.id.desc()).all()
-    return jsonify([customer.to_dict() for customer in customers]), 200
-
-
-@app.route("/api/customers/<int:customer_id>", methods=["GET"])
-def api_get_customer(customer_id):
-    customer = Customer.query.get(customer_id)
-
-    if not customer:
-        return jsonify({"error": "Customer not found"}), 404
-
-    return jsonify(customer.to_dict()), 200
-
-
-@app.route("/api/customers", methods=["POST"])
-def api_create_customer():
-    data = request.get_json(silent=True)
-
-    if not data:
-        return jsonify({"error": "Invalid or missing JSON body"}), 400
-
-    name = data.get("name", "").strip()
-    email = data.get("email", "").strip()
-    company = data.get("company", "").strip()
-    phone = data.get("phone", "").strip()
-    status = data.get("status", "prospect").strip()
-
-    if not name or not email:
-        return jsonify({"error": "Name and email are required"}), 400
-
-    customer = Customer(
-        name=name,
-        email=email,
-        company=company,
-        phone=phone,
-        status=status
-    )
-
-    db.session.add(customer)
-    db.session.commit()
-
-    return jsonify(customer.to_dict()), 201
-
-
-@app.route("/api/customers/<int:customer_id>", methods=["PUT"])
-def api_update_customer(customer_id):
-    customer = Customer.query.get(customer_id)
-
-    if not customer:
-        return jsonify({"error": "Customer not found"}), 404
-
-    data = request.get_json(silent=True)
-
-    if not data:
-        return jsonify({"error": "Invalid or missing JSON body"}), 400
-
-    name = data.get("name", customer.name).strip()
-    email = data.get("email", customer.email).strip()
-    company = data.get("company", customer.company or "").strip()
-    phone = data.get("phone", customer.phone or "").strip()
-    status = data.get("status", customer.status).strip()
-
-    if not name or not email:
-        return jsonify({"error": "Name and email are required"}), 400
-
-    customer.name = name
-    customer.email = email
-    customer.company = company
-    customer.phone = phone
-    customer.status = status
-
-    db.session.commit()
-
-    return jsonify(customer.to_dict()), 200
-
-
-@app.route("/api/customers/<int:customer_id>", methods=["DELETE"])
-def api_delete_customer(customer_id):
-    customer = Customer.query.get(customer_id)
-
-    if not customer:
-        return jsonify({"error": "Customer not found"}), 404
-
-    db.session.delete(customer)
-    db.session.commit()
-
-    return jsonify({"message": "Customer deleted successfully"}), 200
-
-
-@app.route("/api/leads", methods=["GET"])
-def api_get_leads():
-    leads = Lead.query.order_by(Lead.id.desc()).all()
-    return jsonify([lead.to_dict() for lead in leads]), 200
-
-
-@app.route("/api/leads/<int:lead_id>", methods=["GET"])
-def api_get_lead(lead_id):
-    lead = Lead.query.get(lead_id)
-
-    if not lead:
-        return jsonify({"error": "Lead not found"}), 404
-
-    return jsonify(lead.to_dict()), 200
-
-
-@app.route("/api/leads", methods=["POST"])
-def api_create_lead():
-    data = request.get_json(silent=True)
-
-    if not data:
-        return jsonify({"error": "Invalid or missing JSON body"}), 400
-
-    name = data.get("name", "").strip()
-    email = data.get("email", "").strip()
-    company = data.get("company", "").strip()
-    phone = data.get("phone", "").strip()
-    source = data.get("source", "").strip()
-
-    if not name or not email:
-        return jsonify({"error": "Name and email are required"}), 400
-
-    lead = Lead(
-        name=name,
-        email=email,
-        company=company,
-        phone=phone,
-        source=source
-    )
-
-    db.session.add(lead)
-    db.session.commit()
-
-    return jsonify(lead.to_dict()), 201
-
-
-@app.route("/api/leads/<int:lead_id>", methods=["PUT"])
-def api_update_lead(lead_id):
-    lead = Lead.query.get(lead_id)
-
-    if not lead:
-        return jsonify({"error": "Lead not found"}), 404
-
-    data = request.get_json(silent=True)
-
-    if not data:
-        return jsonify({"error": "Invalid or missing JSON body"}), 400
-
-    name = data.get("name", lead.name).strip()
-    email = data.get("email", lead.email).strip()
-    company = data.get("company", lead.company or "").strip()
-    phone = data.get("phone", lead.phone or "").strip()
-    source = data.get("source", lead.source or "").strip()
-
-    if not name or not email:
-        return jsonify({"error": "Name and email are required"}), 400
-
-    lead.name = name
-    lead.email = email
-    lead.company = company
-    lead.phone = phone
-    lead.source = source
-
-    db.session.commit()
-
-    return jsonify(lead.to_dict()), 200
-
-
-@app.route("/api/leads/<int:lead_id>", methods=["DELETE"])
-def api_delete_lead(lead_id):
-    lead = Lead.query.get(lead_id)
-
-    if not lead:
-        return jsonify({"error": "Lead not found"}), 404
-
-    db.session.delete(lead)
-    db.session.commit()
-
-    return jsonify({"message": "Lead deleted successfully"}), 200
-
-
-@app.errorhandler(403)
-def forbidden(error):
-    return render_template("500.html"), 403
+api_bp = Blueprint("api", __name__, url_prefix="/api")
+
+api = Api(
+    api_bp,
+    version="1.0",
+    title="CRM REST API",
+    description="Simple Flask CRM API",
+    doc="/docs"
+)
+
+customer_input = api.model("CustomerInput", {
+    "name": fields.String(required=True),
+    "email": fields.String(required=True),
+    "company": fields.String(required=True),
+    "phone": fields.String(required=True),
+    "status": fields.String(required=True)
+})
+
+customer_output = api.model("CustomerOutput", {
+    "id": fields.Integer,
+    "name": fields.String,
+    "email": fields.String,
+    "company": fields.String,
+    "phone": fields.String,
+    "status": fields.String
+})
+
+lead_input = api.model("LeadInput", {
+    "name": fields.String(required=True),
+    "email": fields.String(required=True),
+    "company": fields.String(required=True),
+    "value": fields.Float(required=True),
+    "source": fields.String(required=True)
+})
+
+lead_output = api.model("LeadOutput", {
+    "id": fields.Integer,
+    "name": fields.String,
+    "email": fields.String,
+    "company": fields.String,
+    "value": fields.Float,
+    "source": fields.String
+})
+
+
+@api.route("/customers")
+class CustomerListApi(Resource):
+    @api.marshal_list_with(customer_output)
+    def get(self):
+        return Customer.query.all()
+
+    @api.expect(customer_input, validate=True)
+    @api.marshal_with(customer_output, code=201)
+    def post(self):
+        data = api.payload
+
+        customer = Customer(
+            name=data["name"],
+            email=data["email"],
+            company=data["company"],
+            phone=data["phone"],
+            status=data["status"]
+        )
+        db.session.add(customer)
+        db.session.commit()
+        return customer, 201
+
+
+@api.route("/customers/<int:customer_id>")
+class CustomerApi(Resource):
+    @api.marshal_with(customer_output)
+    def get(self, customer_id):
+        customer = Customer.query.get(customer_id)
+        if not customer:
+            api.abort(404, "Customer not found")
+        return customer
+
+    @api.expect(customer_input, validate=True)
+    @api.marshal_with(customer_output)
+    def put(self, customer_id):
+        customer = Customer.query.get(customer_id)
+        if not customer:
+            api.abort(404, "Customer not found")
+
+        data = api.payload
+        customer.name = data["name"]
+        customer.email = data["email"]
+        customer.company = data["company"]
+        customer.phone = data["phone"]
+        customer.status = data["status"]
+
+        db.session.commit()
+        return customer
+
+    def delete(self, customer_id):
+        customer = Customer.query.get(customer_id)
+        if not customer:
+            api.abort(404, "Customer not found")
+
+        db.session.delete(customer)
+        db.session.commit()
+        return {"message": "Customer deleted"}, 200
+
+
+@api.route("/leads")
+class LeadListApi(Resource):
+    @api.marshal_list_with(lead_output)
+    def get(self):
+        return Lead.query.all()
+
+    @api.expect(lead_input, validate=True)
+    @api.marshal_with(lead_output, code=201)
+    def post(self):
+        data = api.payload
+
+        lead = Lead(
+            name=data["name"],
+            email=data["email"],
+            company=data["company"],
+            value=data["value"],
+            source=data["source"]
+        )
+        db.session.add(lead)
+        db.session.commit()
+        return lead, 201
+
+
+@api.route("/leads/<int:lead_id>")
+class LeadApi(Resource):
+    @api.marshal_with(lead_output)
+    def get(self, lead_id):
+        lead = Lead.query.get(lead_id)
+        if not lead:
+            api.abort(404, "Lead not found")
+        return lead
+
+    @api.expect(lead_input, validate=True)
+    @api.marshal_with(lead_output)
+    def put(self, lead_id):
+        lead = Lead.query.get(lead_id)
+        if not lead:
+            api.abort(404, "Lead not found")
+
+        data = api.payload
+        lead.name = data["name"]
+        lead.email = data["email"]
+        lead.company = data["company"]
+        lead.value = data["value"]
+        lead.source = data["source"]
+
+        db.session.commit()
+        return lead
+
+    def delete(self, lead_id):
+        lead = Lead.query.get(lead_id)
+        if not lead:
+            api.abort(404, "Lead not found")
+
+        db.session.delete(lead)
+        db.session.commit()
+        return {"message": "Lead deleted"}, 200
+
+
+app.register_blueprint(api_bp)
 
 
 @app.errorhandler(404)
@@ -1109,6 +585,4 @@ def internal_error(error):
 
 
 if __name__ == "__main__":
-    with app.app_context():
-        db.create_all()
-    app.run(debug=True, host="127.0.0.1", port=5000)
+    app.run(debug=True)

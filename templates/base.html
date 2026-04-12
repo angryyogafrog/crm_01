@@ -4,46 +4,125 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}CRM{% endblock %}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: #f4f6f8;
+            color: #222;
+        }
+
+        nav {
+            background: #1f2937;
+            padding: 14px 24px;
+        }
+
+        nav a {
+            color: white;
+            text-decoration: none;
+            margin-right: 14px;
+            font-weight: 600;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 40px auto;
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 18px rgba(0, 0, 0, 0.08);
+        }
+
+        h1, h2, h3 {
+            margin-top: 0;
+        }
+
+        input, select, textarea {
+            width: 100%;
+            padding: 10px;
+            margin-top: 6px;
+            margin-bottom: 16px;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            box-sizing: border-box;
+        }
+
+        button, .btn {
+            display: inline-block;
+            padding: 10px 16px;
+            background: #2563eb;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            text-decoration: none;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        button:hover, .btn:hover {
+            background: #1d4ed8;
+        }
+
+        .flash {
+            background: #e0f2fe;
+            border: 1px solid #7dd3fc;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 16px;
+        }
+
+        th, td {
+            border: 1px solid #e5e7eb;
+            padding: 10px;
+            text-align: left;
+        }
+
+        th {
+            background: #f9fafb;
+        }
+
+        .small-link {
+            color: #2563eb;
+            text-decoration: none;
+        }
+
+        .card-links a {
+            display: inline-block;
+            margin-right: 10px;
+            margin-top: 10px;
+        }
+    </style>
 </head>
 <body>
-    <nav class="navbar">
-        <div class="container">
-            <div class="nav-brand">CRM System</div>
-            <ul class="nav-menu">
-                <li><a href="{{ url_for('index') }}" class="nav-link">Home</a></li>
-
-                {% if current_user.is_authenticated %}
-                    <li><a href="{{ url_for('customers') }}" class="nav-link">Customers</a></li>
-                    <li><a href="{{ url_for('leads') }}" class="nav-link">Leads</a></li>
-
-                    {% if current_user.is_admin() %}
-                        <li><a href="{{ url_for('add_customer') }}" class="nav-link">Add Customer</a></li>
-                        <li><a href="{{ url_for('add_lead') }}" class="nav-link">Add Lead</a></li>
-                        <li><a href="{{ url_for('import_data') }}" class="nav-link">Import Data</a></li>
-                    {% endif %}
-
-                    <li><a href="{{ url_for('logout') }}" class="nav-link">Logout</a></li>
-                {% else %}
-                    <li><a href="{{ url_for('login') }}" class="nav-link">Login</a></li>
-                    <li><a href="{{ url_for('register') }}" class="nav-link">Register</a></li>
-                {% endif %}
-            </ul>
-        </div>
+    <nav>
+        {% if current_user.is_authenticated %}
+            <a href="{{ url_for('index') }}">Home</a>
+            <a href="{{ url_for('customers') }}">Customers</a>
+            <a href="{{ url_for('leads') }}">Leads</a>
+            <a href="/api/docs">REST API</a>
+            <a href="{{ url_for('logout') }}">Logout</a>
+        {% else %}
+            <a href="{{ url_for('login') }}">Login</a>
+            <a href="{{ url_for('register') }}">Register</a>
+        {% endif %}
     </nav>
 
     <div class="container">
-        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% with messages = get_flashed_messages() %}
             {% if messages %}
-                {% for category, message in messages %}
-                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% for message in messages %}
+                    <div class="flash">{{ message }}</div>
                 {% endfor %}
             {% endif %}
         {% endwith %}
 
         {% block content %}{% endblock %}
     </div>
-
-    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
 </body>
 </html>

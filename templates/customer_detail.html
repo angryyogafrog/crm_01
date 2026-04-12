@@ -1,0 +1,18 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<h1>{{ customer.name }}</h1>
+
+<p><strong>Email:</strong> {{ customer.email }}</p>
+<p><strong>Company:</strong> {{ customer.company }}</p>
+<p><strong>Phone:</strong> {{ customer.phone }}</p>
+<p><strong>Status:</strong> {{ customer.status }}</p>
+
+<div style="margin-top: 1.5rem;">
+    <a href="{{ url_for('edit_customer', customer_id=customer.id) }}" class="btn btn-primary" style="margin-right: 0.5rem;">Edit</a>
+    <form method="POST" action="{{ url_for('delete_customer', customer_id=customer.id) }}" style="display:inline; margin-right: 0.5rem;">
+        <button type="submit" class="btn btn-danger" onclick="return confirm('Delete?')">Delete</button>
+    </form>
+    <a href="{{ url_for('customers') }}" class="btn btn-primary">Back</a>
+</div>
+{% endblock %}

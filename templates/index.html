@@ -1,10 +1,16 @@
-{% extends 'base.html' %}
+{% extends "base.html" %}
 
-{% block title %}Home - CRM{% endblock %}
+{% block title %}Home{% endblock %}
 
 {% block content %}
-<div class="hero">
-    <h1>Welcome to the CRM System</h1>
-    <p>Manage customers in one place.</p>
+<h1>CRM Dashboard</h1>
+
+<p>Total customers: <strong>{{ total_customers }}</strong></p>
+<p>Total leads: <strong>{{ total_leads }}</strong></p>
+
+<div class="card-links">
+    <a class="btn" href="{{ url_for('customers') }}">Open Customers</a>
+    <a class="btn" href="{{ url_for('leads') }}">Open Leads</a>
+    <a class="btn" href="/api/docs">Open REST API</a>
 </div>
 {% endblock %}
