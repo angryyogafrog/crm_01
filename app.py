@@ -421,6 +421,45 @@ def lead_detail(lead_id):
     return render_template("lead_detail.html", lead=lead)
 
 
+@app.route("/leads/<int:lead_id>/edit", methods=["GET", "POST"])
+@login_required
+@admin_required
+def edit_lead(lead_id):
+    lead = Lead.query.get(lead_id)
+    if not lead:
+        flash("Lead not found.")
+        return redirect(url_for("leads"))
+
+    if request.method == "POST":
+        name = request.form.get("name", "").strip()
+        email = request.form.get("email", "").strip()
+        company = request.form.get("company", "").strip()
+        value = request.form.get("value", "").strip()
+        source = request.form.get("source", "").strip()
+
+        if not all([name, email, company, value, source]):
+            flash("All fields are required.")
+            return redirect(url_for("edit_lead", lead_id=lead.id))
+
+        try:
+            value = float(value)
+        except ValueError:
+            flash("Value must be a number.")
+            return redirect(url_for("edit_lead", lead_id=lead.id))
+
+        lead.name = name
+        lead.email = email
+        lead.company = company
+        lead.value = value
+        lead.source = source
+
+        db.session.commit()
+        flash("Lead updated successfully.")
+        return redirect(url_for("lead_detail", lead_id=lead.id))
+
+    return render_template("edit_lead.html", lead=lead)
+
+
 @app.route("/leads/<int:lead_id>/delete", methods=["POST"])
 @login_required
 @admin_required
