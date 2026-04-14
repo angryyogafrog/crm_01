@@ -1,0 +1,6 @@
+"name","email","company","phone","status"
+"Anna Kowalska","anna.kowalska@example.com","Alpha Studio","+43 660 111 2222","prospect"
+"Piotr Nowak","piotr.nowak@example.com","Nova Trade","+43 660 333 4444","active"
+"Monika Zielinska","monika.zielinska@example.com","MZ Consulting","+43 660 555 6666","inactive"
+"Lukas Weber","lukas.weber@example.com","Weber Solutions","+43 660 777 8888","prospect"
+"Sophie Huber","sophie.huber@example.com","Huber Media","+43 660 999 0000","active"
