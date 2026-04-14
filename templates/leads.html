@@ -1,10 +1,43 @@
 {% extends 'base.html' %}
 
 {% block content %}
+<style>
+    .actions-cell {
+        white-space: nowrap;
+    }
+
+    .action-buttons {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 0.4rem;
+        flex-wrap: nowrap;
+    }
+
+    .action-buttons form {
+        margin: 0;
+    }
+
+    .action-buttons .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 70px;
+        height: 36px;
+        padding: 0 12px;
+        font-size: 14px;
+        line-height: 1;
+        white-space: nowrap;
+        box-sizing: border-box;
+    }
+</style>
+
 <h1>Sales Leads</h1>
 
 <p>
-    <a href="{{ url_for('add_lead') }}" class="btn btn-primary">+ Add Lead</a>
+    {% if current_user.is_authenticated and current_user.is_admin %}
+        <a href="{{ url_for('add_lead') }}" class="btn btn-primary">+ Add Lead</a>
+    {% endif %}
 </p>
 
 <table class="table">
@@ -15,17 +48,22 @@
         <th>Source</th>
         <th>Actions</th>
     </tr>
-    {% for l in leads %}
+    {% for lead in leads %}
     <tr>
-        <td>{{ l.name }}</td>
-        <td>{{ l.company }}</td>
-        <td>${{ l.value }}</td>
-        <td>{{ l.source }}</td>
-        <td>
-            <a href="{{ url_for('lead_detail', lead_id=l.id) }}" class="btn btn-sm btn-primary">View</a>
-            <form method="POST" action="{{ url_for('delete_lead', lead_id=l.id) }}" style="display:inline">
-                <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Delete?')">Delete</button>
-            </form>
+        <td>{{ lead.name }}</td>
+        <td>{{ lead.company }}</td>
+        <td>${{ lead.value }}</td>
+        <td>{{ lead.source }}</td>
+        <td class="actions-cell">
+            <div class="action-buttons">
+                <a href="{{ url_for('lead_detail', lead_id=lead.id) }}" class="btn btn-sm btn-primary">View</a>
+
+                {% if current_user.is_authenticated and current_user.is_admin %}
+                    <form method="POST" action="{{ url_for('delete_lead', lead_id=lead.id) }}">
+                        <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Delete?')">Delete</button>
+                    </form>
+                {% endif %}
+            </div>
         </td>
     </tr>
     {% endfor %}

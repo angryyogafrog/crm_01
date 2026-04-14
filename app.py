@@ -1,3 +1,4 @@
+from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, flash, Blueprint, send_file
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
 from flask_restx import Api, Resource, fields
@@ -41,6 +42,18 @@ def clean_value(value):
     if pd.isna(value):
         return ""
     return str(value).strip()
+
+
+def admin_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not current_user.is_authenticated:
+            return redirect(url_for("login"))
+        if not current_user.is_admin:
+            flash("Only admin can perform this action.")
+            return redirect(url_for("index"))
+        return f(*args, **kwargs)
+    return decorated_function
 
 
 @login_manager.user_loader
@@ -88,13 +101,19 @@ def register():
             flash("Username or email already exists.")
             return redirect(url_for("register"))
 
-        user = User(username=username, email=email)
+        role = "admin" if User.query.count() == 0 else "user"
+
+        user = User(username=username, email=email, role=role)
         user.set_password(password)
 
         db.session.add(user)
         db.session.commit()
 
-        flash("Registration successful.")
+        if role == "admin":
+            flash("Registration successful. This account is the admin account.")
+        else:
+            flash("Registration successful.")
+
         return redirect(url_for("login"))
 
     return render_template("register.html")
@@ -196,6 +215,7 @@ def export_customers_xlsx():
 
 @app.route("/customers/add", methods=["GET", "POST"])
 @login_required
+@admin_required
 def add_customer():
     if request.method == "POST":
         name = request.form.get("name", "").strip()
@@ -226,6 +246,7 @@ def add_customer():
 
 @app.route("/customers/import", methods=["GET", "POST"])
 @login_required
+@admin_required
 def import_customers():
     if request.method == "POST":
         if "file" not in request.files:
@@ -313,6 +334,7 @@ def customer_detail(customer_id):
 
 @app.route("/customers/<int:customer_id>/edit", methods=["GET", "POST"])
 @login_required
+@admin_required
 def edit_customer(customer_id):
     customer = Customer.query.get(customer_id)
     if not customer:
@@ -335,6 +357,7 @@ def edit_customer(customer_id):
 
 @app.route("/customers/<int:customer_id>/delete", methods=["POST"])
 @login_required
+@admin_required
 def delete_customer(customer_id):
     customer = Customer.query.get(customer_id)
     if customer:
@@ -353,6 +376,7 @@ def leads():
 
 @app.route("/leads/add", methods=["GET", "POST"])
 @login_required
+@admin_required
 def add_lead():
     if request.method == "POST":
         name = request.form.get("name", "").strip()
@@ -399,6 +423,7 @@ def lead_detail(lead_id):
 
 @app.route("/leads/<int:lead_id>/delete", methods=["POST"])
 @login_required
+@admin_required
 def delete_lead(lead_id):
     lead = Lead.query.get(lead_id)
     if lead:
@@ -462,6 +487,9 @@ class CustomerListApi(Resource):
     @api.expect(customer_input, validate=True)
     @api.marshal_with(customer_output, code=201)
     def post(self):
+        if not current_user.is_authenticated or not current_user.is_admin:
+            api.abort(403, "Only admin can add customers")
+
         data = api.payload
 
         customer = Customer(
@@ -488,6 +516,9 @@ class CustomerApi(Resource):
     @api.expect(customer_input, validate=True)
     @api.marshal_with(customer_output)
     def put(self, customer_id):
+        if not current_user.is_authenticated or not current_user.is_admin:
+            api.abort(403, "Only admin can edit customers")
+
         customer = Customer.query.get(customer_id)
         if not customer:
             api.abort(404, "Customer not found")
@@ -503,6 +534,9 @@ class CustomerApi(Resource):
         return customer
 
     def delete(self, customer_id):
+        if not current_user.is_authenticated or not current_user.is_admin:
+            api.abort(403, "Only admin can delete customers")
+
         customer = Customer.query.get(customer_id)
         if not customer:
             api.abort(404, "Customer not found")
@@ -521,6 +555,9 @@ class LeadListApi(Resource):
     @api.expect(lead_input, validate=True)
     @api.marshal_with(lead_output, code=201)
     def post(self):
+        if not current_user.is_authenticated or not current_user.is_admin:
+            api.abort(403, "Only admin can add leads")
+
         data = api.payload
 
         lead = Lead(
@@ -547,6 +584,9 @@ class LeadApi(Resource):
     @api.expect(lead_input, validate=True)
     @api.marshal_with(lead_output)
     def put(self, lead_id):
+        if not current_user.is_authenticated or not current_user.is_admin:
+            api.abort(403, "Only admin can edit leads")
+
         lead = Lead.query.get(lead_id)
         if not lead:
             api.abort(404, "Lead not found")
@@ -562,6 +602,9 @@ class LeadApi(Resource):
         return lead
 
     def delete(self, lead_id):
+        if not current_user.is_authenticated or not current_user.is_admin:
+            api.abort(403, "Only admin can delete leads")
+
         lead = Lead.query.get(lead_id)
         if not lead:
             api.abort(404, "Lead not found")
